@@ -1,0 +1,101 @@
+Help on class QdbMethodsMixin in module flareqdb:
+
+class QdbMethodsMixin
+ |  Instance methods most likely to be used in a script for setting up a
+ |  qdb session rather than in a breakpoint context.
+ |  
+ |  These are not aliased as unbound methods in the namespace.
+ |  
+ |  Methods defined here:
+ |  
+ |  add_queries(self, queries)
+ |      Add multiple queries simultaneously.
+ |      
+ |      Each query must have two elements (a program counter and some Python to
+ |      evaluate) or three elements (a conditional expression to also
+ |      evaluate).
+ |      
+ |      Parameters
+ |      ----------
+ |      queries : list(list)
+ |          List of queries
+ |  
+ |  add_query(self, vexpr_pc, query, conds=None)
+ |      Add a single permanent query with an optional conditional
+ |      expression.
+ |      
+ |      Permanent queries are tracked in a list, and that list is processed
+ |      every time run() is invoked, which can be more than once. To add an
+ |      ephemeral query (only for the current run of the binary), use the bp()
+ |      method instead. To add a query to both a live run and future runs, you
+ |      must invoke both bp() (for the current run) and add_query() (for future
+ |      runs).
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_pc : int or str
+ |          * If an int, this is the program counter virtual address value upon
+ |            which to evaluate :query:.
+ |          * If a str, this is a Vivisect expression that will be evaluated
+ |            when the `run()` is called to calculate the virtual address.
+ |      query : str or callable
+ |          * If a str, this is Python text that will be evaluated in module
+ |            context.
+ |          * If a callable, the function object will be deep copied and its
+ |            `func_globals` attribute will be replaced with a copy of the
+ |            original `func_globals`, augmented to include `context` and
+ |            the contents of the `parameters` dictionary (if any) specified
+ |            when callign `run()`.
+ |  
+ |  add_query_ephemeral(self, vexpr_pc, query, conds, preserve_sym_name=True)
+ |      Add query for the current run only.
+ |      
+ |      If you wish to add a query to future runs as well as the current run,
+ |      you must invoke add_query() (for future runs) as well as
+ |      add_query_ephemeral() (for this run).
+ |      
+ |      Parameters
+ |      vexpr_pc : vexpr (int or str)
+ |          Vivisect expression or integer program counter value
+ |      query : str or callable
+ |          Python script text or a Python callable
+ |      conds : vexpr (int or str)
+ |          Vivisect expression or integer qualifying condition whose truth
+ |          value will determine whether the query is executed or not each time
+ |          the program counter hits this location.
+ |      preserve_sym_name : bool
+ |          Whether to preserve symbolic name from vexpr_pc
+ |  
+ |  attach(self, pid)
+ |      Attach to pid, add queries, and execute.
+ |      
+ |      Parameters
+ |      ----------
+ |      pid : int
+ |          Process ID to attach to
+ |      returns:
+ |          True
+ |  
+ |  clear_counts(self)
+ |      Clear breakpoint hit counts that are maintained by the count()
+ |      function.
+ |  
+ |  clear_queries(self)
+ |      Remove all permanent queries.
+ |      
+ |      Does not remove ephemeral queries. For details, see add_query() and
+ |      add_query_ephemeral().
+ |  
+ |  run(self, cmdline=None, parameters={})
+ |      Apply permanent queries and execute cmdline.
+ |      
+ |      Parameters
+ |      ----------
+ |      cmdline : str
+ |          Program and arguments to run. Can be None only if attach() has been
+ |          called successfully.
+ |      parameters : dict
+ |          Optional parameters to pass to breakpoint callables/expressions.
+ |      returns
+ |          bool : True unless an unhandled exception occurred in a breakpoint
+

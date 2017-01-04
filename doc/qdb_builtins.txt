@@ -1,0 +1,591 @@
+Help on class QdbBuiltinsMixin in module flareqdb:
+
+class QdbBuiltinsMixin
+ |  Instance methods that will serve as builtins for Python text evaluated
+ |  within the qdb environment.
+ |  
+ |  The effect of this is that queries can call these instance methods without
+ |  specifying any instance. This makes for shorter, simpler command line
+ |  syntax.
+ |  
+ |  For example, an instance method that might otherwise require an instance as
+ |  follows:
+ |  
+ |      q.kill()
+ |  
+ |  Can be called when evaluating Python text by typing simply:
+ |  
+ |      "kill()"
+ |  
+ |  This allows for syntactic convenience in the CLI and in scripts that
+ |  specify queries in the form of Python text instead of as callables.
+ |  
+ |  This behavior is implemented by Qdb._setupBuiltins() which adds an unbound
+ |  function to the locals namespace for every instance method that comes from
+ |  QdbBuiltinsMixin.
+ |  
+ |  Methods defined here:
+ |  
+ |  bp(self, vexpr_pc, query)
+ |      Add a breakpoint to execute a query.
+ |      
+ |      Examples:
+ |          q.bp(0x401000, process_main)
+ |          q.bp(0x401000, "uf()")
+ |          "bp(0x401000, 'uf()')"
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_pc : str or int
+ |          Vivisect expression or integer expressing the virtual address at
+ |          which to break execution and execute the query.
+ |      query : str or callable
+ |          Python text or a Python callable to execute upon hitting this
+ |          breakpoint.
+ |      returns:
+ |          int: Trace Breakpoint ID.
+ |  
+ |  count(self)
+ |      Accumulate a count of occasions when a location was hit.
+ |      
+ |      The counts are stored in (and can be retrieved from) the dictionary
+ |      self.counts in which each key is the symbolic name for a program
+ |      counter value and each value is the number of times an instruction at
+ |      that location was executed.
+ |      
+ |      returns:
+ |          int: Current count for this location.
+ |  
+ |  da(self, vexpr_va, cc=0)
+ |      Dump cc characters of ASCII string starting at vexpr_va.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer value expressing the virtual address
+ |          to start at.
+ |      cc : int
+ |          Number of characters to dump.
+ |      returns:
+ |          str: string retrieved from vexpr_va.
+ |  
+ |  db(self, vexpr_va, n=128)
+ |      Dump n byte(s) starting at vexpr_va.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer value expressing the virtual address
+ |          to start at.
+ |      n : int
+ |          Number of elements to dump.
+ |      returns:
+ |          list: array of elements retrieved from vexpr_va.
+ |  
+ |  dd(self, vexpr_va, n=32)
+ |      Dump n DWORD(s) starting at vexpr_va.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer value expressing the virtual address
+ |          to start at.
+ |      n : int
+ |          Number of elements to dump.
+ |      returns:
+ |          list: array of elements retrieved from vexpr_va.
+ |  
+ |  detach(self)
+ |      Detach from debuggee, leaving it running.
+ |      
+ |      Returns:
+ |          int: PID.
+ |  
+ |  disas(self, vexpr_va, count=0, until_ret=False)
+ |      Disassemble instructions.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str
+ |          Vivisect expression indicating the location to start disassembly.
+ |      count : int
+ |          Number of instructions to disassemble.
+ |      until_ret : bool
+ |          Whether to disassemble until a return instruction is encountered.
+ |      returns : list
+ |          ASCII strings containing mnemonics and operands disassembled
+ |          starting at vexpr_va.
+ |  
+ |  dq(self, vexpr_va, n=16)
+ |      Dump n quadwords(s) starting at vexpr_va.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer value expressing the virtual address
+ |          to start at.
+ |      n : int
+ |          Number of elements to dump.
+ |      returns:
+ |          list: array of elements retrieved from vexpr_va.
+ |  
+ |  du(self, vexpr_va, cc=0)
+ |      Dump cc characters of Unicode string starting at vexpr_va.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer value expressing the virtual address
+ |          to start at.
+ |      cc : int
+ |          Number of characters to dump.
+ |      returns:
+ |          str: Unicode string retrieved from vexpr_va.
+ |  
+ |  dw(self, vexpr_va, n=64)
+ |      Dump n word(s) starting at vexpr_va.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer value expressing the virtual address
+ |          to start at.
+ |      n : int
+ |          Number of elements to dump.
+ |      returns:
+ |          list: array of elements retrieved from vexpr_va.
+ |  
+ |  ea(self, vexpr_dst, s)
+ |      Edit (write) ASCII string without terminating NULL.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      s : str
+ |          String to write.
+ |  
+ |  eb(self, vexpr_dst, bytes)
+ |      Edit (write) one or more bytes.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      bytes : string
+ |          Bytes to write.
+ |  
+ |  ed(self, vexpr_dst, n)
+ |      Edit (write) dword.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      n : int or list
+ |          Value(s) to write.
+ |  
+ |  eq(self, vexpr_dst, n)
+ |      Edit (write) quadword.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      n : int
+ |          Value to write.
+ |  
+ |  eu(self, vexpr_dst, s)
+ |      Edit (write) Unicode string without terminating NULL.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      s : str
+ |          String to write.
+ |  
+ |  ew(self, vexpr_dst, n)
+ |      Edit (write) word.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      n : int
+ |          Value to write.
+ |  
+ |  eza(self, vexpr_dst, s)
+ |      Edit (write) ASCII string with terminating NULL.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      s : str
+ |          String to write.
+ |  
+ |  ezu(self, vexpr_dst, s)
+ |      Edit (write) Unicode string with terminating NULL.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      s : str
+ |          String to write.
+ |  
+ |  get_exitcode(self)
+ |      Get the exit code, valid only if the program has terminated.
+ |  
+ |  get_pc(self)
+ |      Get the program counter of the currently selected thread within the
+ |      debuggee.
+ |  
+ |  get_pcs(self)
+ |      Get dictionary of thread ID => program counter pairs.
+ |      
+ |      Returns:
+ |          dict: tid => program counter
+ |  
+ |  get_pid(self)
+ |      Get the PID of the debuggee.
+ |      
+ |      Returns:
+ |          int: PID.
+ |  
+ |  get_push_arg(self, argno)
+ |      Get argument from stack.
+ |      
+ |      Assumes i386.
+ |      Assumes the prolog has not yet executed.
+ |      
+ |      Parameters
+ |      ----------
+ |      argno : int
+ |          Number of the argument to get, zero-based.
+ |  
+ |  get_retaddr(self)
+ |      Get return address.
+ |      
+ |      Assumes i386.
+ |      Assumes the prolog has not yet been executed.
+ |  
+ |  get_tid(self)
+ |      Get the TID of the currently selected thread.
+ |      
+ |      Returns:
+ |          int: TID.
+ |  
+ |  getsym(self, vexpr_va)
+ |      Get the symbol associated with a location. Alias: ln.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str
+ |          Vivisect expression indicating the virtual address for which to
+ |          resolve the symbol name.
+ |      returns:
+ |          str: Symbol name or '(unknown)' if unknown.
+ |  
+ |  gu(self, nframes=1, limit=16384, steptype=0)
+ |      Go up one frame.
+ |      
+ |      Executes stepwise until function return and executes the return.
+ |      Optional nframes argument controls repetition of this operation.
+ |      
+ |      Parameters
+ |      ----------
+ |      nframes : int
+ |          Number of times to go up.
+ |      limit : int
+ |          Maximum number of instructions to traverse searching for each
+ |          function return.
+ |      steptype : StepType enumeration member
+ |          See retcallback() documentation for details.
+ |  
+ |  hit(self)
+ |      Indicate on the console that a location was hit.
+ |      
+ |      returns:
+ |          bool: True - useful for setting a flag.
+ |  
+ |  kill(self)
+ |      Halt further execution from within a breakpoint context.
+ |      
+ |      Returns:
+ |          bool: True.
+ |  
+ |  ln(self, vexpr_va)
+ |      Alias for getsym.
+ |  
+ |  memcpy(self, vexpr_dst, vexpr_src, vexpr_n)
+ |      Copy vexpr_n bytes from vexpr_src to vexpr_dst within debuggee.
+ |      
+ |      Examples:
+ |          q.memcpy('edi', 'esi', 1024)
+ |          "memcpy('edi', 'esi', 1024)"
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      vexpr_src : str or int
+ |          Vivisect expression or integer value expressing the soruce virtual
+ |          address to read from.
+ |      vexpr_n : int
+ |          Number of bytes to read.
+ |  
+ |  park(self, tid=None)
+ |      Suspend the debuggee in an infinite loop.
+ |      
+ |      Allocates memory, writes an infinite loop to that memory, writes the
+ |      current value of the program counter after the loop, and finally
+ |      updates the program counter to execute the infinite loop.
+ |      
+ |      This allows another debugger to attach to the process. The analyst can
+ |      then manually or programmatically alter the program counter register to
+ |      resume execution at the program counter value stored after the loop.
+ |      
+ |      This function does not detach from the process; the user must call
+ |      detach() when ready.
+ |      
+ |      Examples:
+ |          q.park()  # Park current thread
+ |          q.park(some_tid)  # Park some other thread
+ |      
+ |          "park()"
+ |          "park(some_tid)"
+ |      
+ |      Parameters
+ |      ----------
+ |      tid : int
+ |          Thread ID to park. If not specified, qdb parks the current thread.
+ |      returns:
+ |          tuple: original PC, new PC, tid).
+ |  
+ |  r(self, vexpr_reg, vexpr_val=None)
+ |      Get or set a register.
+ |      
+ |      Examples:
+ |          q.r('eax')
+ |          q.r('eax', 0)
+ |      
+ |          "r('eax')"
+ |          "r('eax', 0)"
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_reg : str
+ |          Register of concern. Can be any width supported by the architecture
+ |          of the debuggee. For instance, eax can be accessed as 'eax', 'ax',
+ |          'al', or 'ah'. On 64-bit debuggees, rax can also be accessed as
+ |          'rax'.
+ |      vexpr_val : str or int, optional
+ |          Optional Vivisect expression or integer value to assign to the
+ |          register specified by vexpr_reg. If this is not specified, then the
+ |          value of the register is merely retrieved.
+ |  
+ |  readmem(self, vexpr_va, elements, element_size, sentinel)
+ |      Read a range of bytes.
+ |      
+ |      Caller must either specify a non-zero number of elements, or specify a
+ |      sentinel value upon which to stop, whose size must match element_size.
+ |      Optional limit protects from run-away read, mainly intended for when a
+ |      sentinel value is never encountered but enforced in the fixed range
+ |      read as well for consistency.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer value expressing the virtual address
+ |          at which to read memory.
+ |      elements : int
+ |          Number of elements of size element_size to read.
+ |      element_size : int
+ |          Size of each element.
+ |      sentinel : str
+ |          Sentinel element value upon which to stop.
+ |  
+ |  readstruct(self, factory, vexpr_va, vexpr_size=0)
+ |      Read a vstruct from memory.
+ |      
+ |      Parameters
+ |      ----------
+ |      factory : callable
+ |          e.g. vstruct.defs.win32.OSVERSIONINFOEXW
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer indicating the virtual address to
+ |          read from.
+ |      vexpr_size : str or int
+ |          Vivisect expression or integer indicating the size to read.
+ |          Default (0) will read up to the next page boundary.
+ |  
+ |  retcallback(self, cb_ret=None, limit=16384, steptype=0)
+ |      Parameters
+ |      ----------
+ |      cb_ret : callable
+ |          Callback to execute upon finding the final return instruction.
+ |      limit : int
+ |          Maximum number of instructions to execute before giving up. Zero
+ |          means infinite.
+ |      steptype : StepType enumeration member
+ |          StepType.stepi: step into calls
+ |          StepType.stepo: step over calls
+ |  
+ |  retset(self, vexpr_val, limit=16384, steptype=0)
+ |      Step the program counter, ignoring breakpoints, until a return
+ |      instruction is found, and then alter the value stored in eax/rax.
+ |      
+ |      Examples:
+ |          "retset('eax-1')"
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_val : str or int
+ |          Vivisect expression expressing the value to set in the return
+ |          address register (rax/eax) before returning.
+ |      limit : int
+ |          Maximum number of instructions to execute before giving up. Zero
+ |          means infinite.
+ |      returns:
+ |          Value in the return value register (rax/eax) after the replacement
+ |          instruction.
+ |  
+ |  retwatch(self, limit=16384, steptype=0)
+ |      Step the program counter, ignoring breakpoints, until a return
+ |      instruction is found, and then return the value stored in eax/rax.
+ |      
+ |      Parameters
+ |      ----------
+ |      limit : int
+ |          Maximum number of instructions to execute before giving up. Zero
+ |          means infinite.
+ |      returns:
+ |          Value in the return value register (rax/eax) at the ret
+ |          instruction.
+ |  
+ |  setreg(self, vexpr_reg, vexpr_val)
+ |      Set a register to a value. Quasi-alias: r.
+ |      
+ |      Examples:
+ |          q.setreg('eax', 0)
+ |          "setreg('eax', 0)"
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_reg : str
+ |          Register of concern. Can be any width supported by the architecture
+ |          of the debuggee. For instance, eax can be accessed as 'eax', 'ax',
+ |          'al', or 'ah'. On 64-bit debuggees, rax can also be accessed as
+ |          'rax'.
+ |      vexpr_val : str or int
+ |          Vivisect expression or integer value to assign to the register
+ |          specified by vexpr_reg.
+ |  
+ |  u(self, vexpr_va=None, count=5)
+ |      Unassemble (disassemble) bytes.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str
+ |          Vivisect expression indicating the location to start disassembly.
+ |      count : int
+ |          Number of instructions to disassemble.
+ |      returns : list
+ |          ASCII strings containing mnemonics and operands disassembled
+ |          starting at vexpr_va.
+ |  
+ |  uf(self, vexpr_va=None)
+ |      Unassemble (disassemble) function.
+ |      
+ |      Stops disassembly when a ret instruction is encountered.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str
+ |          Vivisect expression indicating the location to start disassembly.
+ |      returns : list
+ |          ASCII strings containing mnemonics and operands disassembled
+ |          starting at vexpr_va.
+ |  
+ |  unpark(self, spec=0, tid=None)
+ |      Verify that the specified thread(s) have been parked, read the
+ |      stored program counter value after the infinite infloop code, and set
+ |      the program counter register to that value.
+ |      
+ |      For details on what parking means, see the documentation for park().
+ |      
+ |      This function only sets the program counter and does not automatically
+ |      resume execution; the user must call run() when ready.
+ |      
+ |      This function will raise an exception if the specified thread or
+ |      threads are not found to be parked.
+ |      
+ |      Examples:
+ |          q = flareqdb.Qdb()
+ |          q.attach(int(sys.argv[1], 10))
+ |          q.unpark()
+ |          q.run()
+ |      
+ |          "unpark(UnparkSpec.Specific, saved_tid)"  # Unpark some thread
+ |      
+ |      Parameters
+ |      ----------
+ |      spec : UnparkSpec enumeration member.
+ |          Four possibilities:
+ |          * UnparkSpec.First: Unpark the first parked thread found.
+ |          * UnparkSpec.Any: Unpark any parked threads found.
+ |          * UnparkSpec.All: Unpark all threads.
+ |          * UnparkSpec.Specific: Unpark the thread specified by tid.
+ |      tid : int
+ |          Thread ID to unpark.
+ |  
+ |  vex(self, vexpr)
+ |      Evaluate Vivisect expression in context of debuggee. Alias: ?().
+ |      
+ |      Examples:
+ |          q.vex('poi(edi) + 4')
+ |          "vex('eax * 2')"
+ |          "?('eax * 2')"
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr : str or int
+ |          Vivisect expression or integer literal. Vivisect expressions are
+ |          evaluated against the debuggee's process address space and register
+ |          file. Integer literals are returned as-is.
+ |      returns:
+ |          int : Result of Vivisect expression evaluation.
+ |  
+ |  writemem(self, vexpr_dst, bytes)
+ |      Write bytes to memory.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_dst : str or int
+ |          Vivisect expression or integer value expressing the destination
+ |          virtual address to write to.
+ |      bytes : string
+ |          String of bytes to write.
+ |  
+ |  writestruct(self, vexpr_va, stru)
+ |      Write a vstruct to memory.
+ |      
+ |      Parameters
+ |      ----------
+ |      vexpr_va : str or int
+ |          Vivisect expression or integer indicating the virtual address to
+ |          read from.
+ |      stru : vstruct
+ |          Vivisect vstruct to write to memory.
+
