@@ -13,6 +13,8 @@ branch, but this is not guaranteed. To use it, type:
 
 	pip install https://github.com/williballenthin/vivisect/zipball/master
 
+This has been added to `requirements.txt` for convenience.
+
 ## Installing flare-qdb
 
 To install flare-qdb, run:
