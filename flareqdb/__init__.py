@@ -487,8 +487,8 @@ class QdbBuiltinsMixin:
         xax = self._archRetRegName()
 
         def retset_callback_closure():
+            val = self._vex(vexpr_val)
             self._conout_pc('Setting return value <= ' + phex_dec(val))
-            val = self._vexpr(vexpr_val)
             self._trace.setRegisterByName(xax, val)
             return self._vex(xax)
 
