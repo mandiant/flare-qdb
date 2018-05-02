@@ -770,9 +770,7 @@ class QdbBuiltinsMixin:
         """
         stru = factory()
         base = self._vex(vexpr_va)
-        size = self._vex(vexpr_size) if vexpr_size else ((base &
-                                                          0xfffffffffffff000) +
-                                                         0x1000 - base)
+        size = self._vex(vexpr_size) if vexpr_size else len(stru)
         bytes = self.readmem(base, 1, size, None)
         stru.vsParse(bytes)
         return stru
