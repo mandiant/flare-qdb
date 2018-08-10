@@ -8,6 +8,7 @@ from __future__ import print_function
 import re
 import sys
 import types
+import ctypes
 import string
 import struct
 import vtrace
@@ -522,8 +523,45 @@ class QdbBuiltinsMixin:
         self._halt()
         return True
 
+    def _forEachThreadOpenAndDo(self, cb):
+        """Open all threads and execute a callback on each"""
+        THREAD_ALL_ACCESS = 0x1fffff
+
+        retval = True
+
+        for tid, tinfo in self._trace.getThreads().items():
+            ht = ctypes.windll.kernel32.OpenThread(THREAD_ALL_ACCESS, 0, tid)
+            if ht:
+                retval = retval and cb(tid, ht)
+                ctypes.windll.kernel32.CloseHandle(ht)
+            else:
+                retval = False
+
+        return retval
+
+    def suspend(self):
+        """Suspend all threads in the debuggee"""
+        def cbSuspendThread(tid, ht):
+            sc = ctypes.windll.kernel32.SuspendThread(ht)
+            self._conout_pc('Suspended TID %s => suspend count %d' %
+                            (phex(tid), sc))
+            return (sc != -1)
+
+        return self._forEachThreadOpenAndDo(cbSuspendThread)
+
+    def resume(self):
+        """Resume all threads in the debuggee"""
+        def cbResumeThread(tid, ht):
+            sc = ctypes.windll.kernel32.ResumeThread(ht)
+            self._conout_pc('Resumed TID %s => suspend count %d' %
+                            (phex(tid), sc))
+            return (sc != -1)
+
+        return self._forEachThreadOpenAndDo(cbResumeThread)
+
+
     def park(self, tid=None):
-        """Suspend the debuggee in an infinite loop.
+        """Place the debuggee in an infinite loop.
 
         Allocates memory, writes an infinite loop to that memory, writes the
         current value of the program counter after the loop, and finally
