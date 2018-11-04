@@ -354,13 +354,20 @@ def main():
     parser.add_argument('--sympath', type=str,
                         help='Override symbol path. Default: %s' %
                         (DEFAULT_SYMPATH))
+    parser.add_argument('--getpdb', type=str, metavar='path_to_cmd',
+                        help='Just get the PDB for the specified copy of '
+                        'cmd.exe')
     parser.add_argument('--dbghelp', type=str, metavar='path_to_dbghelp_dll',
                         help='Override path to a copy of dbghelp.dll. '
                         'Default: %%CD%%\dbghelp.dll')
     args = parser.parse_args()
 
     symname = NM_SYMNAME_FDUMPPARSE if args.fDumpParse else NM_SYMNAME_DISPATCH
-    if args.useoff:
+
+    if args.getpdb:
+        downloadPdbForBin(args.getpdb)
+        sys.exit(1)
+    elif args.useoff:
         offset = args.useoff
     else:
         path_cmd = args.getoff if args.getoff else g_cmd_cmdline[g_arch]
