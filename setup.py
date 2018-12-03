@@ -7,8 +7,8 @@ from setuptools import setup
 requirements = [
     'pefile',
     # Wish I could just add the Vivisect zipball here but that doesn't work,
-    # so you still must either `pip -r requirements.txt` or `pip install
-    # https://github.com/williballenthin/vivisect/zipball/master`
+    # so you still must either `pip install -r requirements.txt` or `pip
+    # install https://github.com/williballenthin/vivisect/zipball/master`
 ]
 
 # Utility function to read the README file.
