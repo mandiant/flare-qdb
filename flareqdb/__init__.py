@@ -134,7 +134,17 @@ class QdbMethodsMixin:
 
         self._bp_unknown_fail = False
         self._stored_exception = None
-        self._trace.run()
+        if self._init_code:
+            context = {}
+            context['pc'] = 0
+            context['trace'] = self._trace
+            context['q'] = self
+            context['qbp'] = None
+            self._dispatch_python(self._init_code, context)
+
+        # If kill() is called in init code, respect it
+        if self._runnable:
+            self._trace.run()
 
         if self._trace.exited:
             self._exitcode = self._trace.getMeta('ExitCode')
@@ -503,6 +513,7 @@ class QdbBuiltinsMixin:
         pid = self._trace.getPid()
         self._conout_pc('Detaching from PID ' + str(pid))
         self._trace.detach()
+        self._runnable = False
 
         # The trace object should neither be released nor set to None here.
         # This is called in a breakpoint context under Qdb.run(). Calling
@@ -520,6 +531,7 @@ class QdbBuiltinsMixin:
         """
         self._conout_pc('Killing debuggee')
         self._halt()
+        self._runnable = False
         return True
 
     def park(self, tid=None):
@@ -1102,8 +1114,96 @@ class QdbBuiltinsMixin:
 
         return instrs
 
+class QdbDevMixin():
+    """Migrating QdbBreak's functionality for evaluating Python and callables
+    out of QdbBreak and into Qdb to be able to run Python (or callables) upon
+    loading a program but before letting it run free.
+    """
+    def setInitCode(self, code):
+        self._init_code = code
 
-class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
+    def _eval_exprs(self, query, exprs=None, qbp=None):
+        pc = self._trace.getProgramCounter()
+        context = {}
+        context['pc'] = pc
+        context['trace'] = self._trace
+        context['q'] = self
+        context['qbp'] = qbp  # Qdb Breakpoint
+        context['exprs'] = exprs
+
+        if callable(query):
+            self._dispatch_callable(query, context)
+        else:
+            self._dispatch_python(query, context)
+
+    def _expandNonPythonAliases(self, query):
+        """Replace Python-incompatible aliases such as "?()" with real
+        functions such as "vex()".
+        """
+        for frm, to in _SPECIAL_ALIASES:
+            query = self._expandNonPythonAlias(query, frm, to)
+        return query
+
+    def _expandNonPythonAlias(self, query, frm, to):
+        """Replace a a function alias with its corresponding function."""
+        pat = frm + r'(\(.*\))'
+        rep = to + r'\1'
+        result = re.sub(pat, rep, query)
+        result = query if result is None else result
+        return result
+
+    def _dispatch_python(self, query, context):
+        """Evaluate expression(s) associated with this program counter."""
+
+        self._locals.update(self._parameters)
+        self._locals.update(context)
+
+        query = self._expandNonPythonAliases(query)
+
+        exec(query, {}, self._locals)
+
+        # We don't sync back local variable changes for callables because they
+        # use the passed-in params argument to return output values, and
+        # furthermore don't even access locals.
+        #
+        # But we DO sync back local variable changes for evaluated python text
+        # because scripters providing Python text to be evaluated will expect
+        # to be able to modify parameters directly.
+        if self._parameters:
+            for k in self._parameters:
+                if k in self._locals:
+                    self._parameters[k] = self._locals[k]
+
+    def dispatch_callable(self, q, context):
+        """Evaluate expression(s) associated with this program counter."""
+        # self._qdb._parameters.update(context)
+        context.update(self._parameters)
+
+        try:
+            self._query(self._parameters, **context)
+
+        except Exception as e:
+            # This function is called in the context of a breakpoint notify()
+            # routine, which itself is called by TracerBase._fireBreakpoint(),
+            # which will catch and print any exception, causing execution to
+            # continue. Instead of allowing this, this function will save the
+            # exception and backtrace, terminate execution, and Qdb.run() will
+            # re-raise the stored exception. The Qdb object can be used to
+            # obtain the trace that was captured at this point.
+            q._bp_unknown_fail = True
+            q._stored_exception = QdbBpException(
+                'Error in callable',
+                self._query.func_name,
+                str(sys.exc_info()[1]),
+                e,
+                traceback.extract_tb(sys.exc_info()[2])
+            )
+
+            q._halt()
+
+
+
+class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
     """Query-oriented debugger object."""
 
     def __init__(self, conlogger=None):
@@ -1136,6 +1236,8 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
     def _resetDefaults(self):
         self._trace = None
+        self._runnable = True
+        self._init_code = None
         self._exitcode = None
         self._parameters = None
         self._locals = {}
@@ -1571,14 +1673,10 @@ class QdbBreak(vtrace.Breakpoint):
         q._locals.update(self._qdb._parameters)
         q._locals.update(context)
 
-        # FIXME: Polluting globals with _qdb so that global aliases "just
-        # work" for CLI users
-        g = globals()
-
         query = self._expandNonPythonAliases(self._query)
 
         try:
-            exec(query, g, q._locals)
+            exec(query, {}, q._locals)
 
         except Exception as e:
             # This function is called in the context of a breakpoint notify()
