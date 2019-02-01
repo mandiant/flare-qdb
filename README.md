@@ -58,6 +58,12 @@ flare-qdb has been tested primarily on Windows, but works on Linux.
 Unfortunately, the Darwin port of Vivisect's `vtrace.Trace` class is
 incomplete, so flare-qdb does not support OSX.
 
+## Example Scripts
+
+flare-qdb comes with De-DOSfuscator, which is a tool for decoding obfuscated
+batch files by running them. Details can be found in the [De-DOSfuscator
+Guide](doc/dedosfuscator.md) or by reading the blog [Cmd and Conquer: De-DOSfuscation with flare-qdb](https://www.fireeye.com/blog/threat-research/2018/11/cmd-and-conquer-de-dosfuscation-with-flare-qdb.html).
+
 ## Detailed Information
 
 Information about installing flare-qdb is available in the [Installation
@@ -74,6 +80,9 @@ A full reference of flare-qdb's builtins (available both from the CLI and as
 instance methods) is available in the [Builtins
 Reference](doc/qdb_builtins.txt) or by typing `flareqdb --help-builtins` after
 installing flare-qdb.
+
+De-DOSfuscator documentation can be found in the [De-DOSfuscator
+Guide](doc/dedosfuscator.md).
 
 Troubleshooting information can be found in the [Troubleshooting
 Guide](doc/troubleshooting.md).

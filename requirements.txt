@@ -1,1 +1,2 @@
+pefile
 https://github.com/williballenthin/vivisect/zipball/master
