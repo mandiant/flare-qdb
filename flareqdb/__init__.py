@@ -443,6 +443,22 @@ class QdbBuiltinsMixin:
             self.retcallback(None, limit)  # Until return
             self._trace.stepi()  # And one more
 
+    def stepi(self):
+        self._trace.stepi()
+
+    def stepo(self):
+        op = self._trace.parseOpcode(self._trace.getProgramCounter())
+        if op.isCall():
+            next = op.va + op.size
+            id = self._trace.addBreakByAddr(next)
+            self._trace.setMode
+            self._trace.setMode('RunForever', False)
+            self._trace.run()
+            self._trace.setMode('RunForever', True)
+            self._trace.removeBreakpoint(id)
+        else:
+            self.stepi()
+
     def retwatch(self, limit=16384, steptype=StepType.stepo):
         """Step the program counter, ignoring breakpoints, until a return
         instruction is found, and then return the value stored in eax/rax.
