@@ -70,7 +70,7 @@ __version__ = '0.0'
      .text:1000100E                            Add endp
 """
 
-hello_exe_path = 'hello.exe'
+hello_exe_path = r'C:\Users\michael.bailey\files\winbin\hello.exe'
 
 
 
@@ -78,26 +78,6 @@ def test_instantiate():
     dbg = Qdb()
     assert dbg is not None
 
-def test_stepi():
-    dbg = Qdb()
-    locs = {'location': None}
-    dbg.add_query(0x401010, "stepi(); location = r('eip')")
-    result = dbg.run(hello_exe_path, locs)
-
-    assert result is True
-    assert locs['location']
-    assert locs['location'] == (0xD + 0x401015)
-
-
-def test_stepo():
-    dbg = Qdb()
-    locs = {'location': None}
-    dbg.add_query(0x401010, "stepo(); location = r('eip')")
-    result = dbg.run(hello_exe_path, locs)
-
-    assert result is True
-    assert locs['location']
-    assert locs['location'] == 0x401015
 
 def test_run_no_breaks_and_exitcode():
     dbg = Qdb()
@@ -612,6 +592,38 @@ def test_get_push_arg():
     assert result is True
     assert locs['arg_12'] == 12
     assert locs['arg_34'] == 34
+
+
+def test_stepi():
+    dbg = Qdb()
+    locs = {'location': None}
+    dbg.add_query(0x401010, "stepi(); location = r('eip')")  # call _printf
+    result = dbg.run(hello_exe_path, locs)
+
+    assert result is True
+    assert locs['location']
+    assert locs['location'] == (0xD + 0x401015)  # At _printf
+
+
+def test_stepo():
+    dbg = Qdb()
+    locs = {'location': None}
+    dbg.add_query(0x401010, "stepo(); location = r('eip')")  # call _printf
+    result = dbg.run(hello_exe_path, locs)
+
+    assert result is True
+    assert locs['location']
+    assert locs['location'] == 0x401015  # Right after call _printf
+
+
+def test_gu():
+    dbg = Qdb()
+    locs = {'location': None}
+    dbg.add_query(0x401022, "print(hex(r('eip'))); gu(); location = r('eip'); print(hex(location))")  # At _printf
+    result = dbg.run(hello_exe_path, locs)
+    assert result is True
+    assert locs['location']
+    assert locs['location'] == 0x401015  # Right after call _printf
 
 
 def test_retwatch():
