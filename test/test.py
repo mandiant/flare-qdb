@@ -70,7 +70,7 @@ __version__ = '0.0'
      .text:1000100E                            Add endp
 """
 
-hello_exe_path = r'C:\Users\michael.bailey\files\winbin\hello.exe'
+hello_exe_path = r'hello.exe'
 
 
 
