@@ -441,7 +441,23 @@ class QdbBuiltinsMixin:
 
         for f in range(nframes):
             self.retcallback(None, limit)  # Until return
-            self._trace.stepi()  # And one more
+            self.stepi()  # And one more
+
+    def stepi(self):
+        self._trace.stepi()
+
+    def stepo(self):
+        op = self._trace.parseOpcode(self._trace.getProgramCounter())
+        if op.isCall():
+            next = op.va + op.size
+            id = self._trace.addBreakByAddr(next)
+            self._trace.setMode
+            self._trace.setMode('RunForever', False)
+            self._trace.run()
+            self._trace.setMode('RunForever', True)
+            self._trace.removeBreakpoint(id)
+        else:
+            self.stepi()
 
     def retwatch(self, limit=16384, steptype=StepType.stepo):
         """Step the program counter, ignoring breakpoints, until a return
@@ -1266,7 +1282,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
                 logger.error('Failed to find return instruction')
                 break
 
-            self._trace.stepi()
+            self.stepi()
 
         return retval
 
@@ -1288,15 +1304,8 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         callstack = 0
 
         while True:
+            self.stepo()
             op = self._trace.parseOpcode(self._trace.getProgramCounter())
-
-            if op.isCall():
-                next = op.va + op.size
-                id = self._trace.addBreakByAddr(next)
-                self._trace.setMode('RunForever', False)
-                self._trace.run()
-                self._trace.setMode('RunForever', True)
-                self._trace.removeBreakpoint(id)
 
             if op.isReturn():
                 if cb_ret:
@@ -1310,8 +1319,6 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
             if limit == 0:
                 logger.error('Failed to find return instruction')
                 break
-
-            self._trace.stepi()
 
         return retval
 
