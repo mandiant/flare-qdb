@@ -332,13 +332,29 @@ class QdbBuiltinsMixin:
         self._trace.selectThread(old_tid)
         return pcs
 
-    def k(self):
-        return self.stacktrace()
+    def k(self, depth=None):
+        """WinDbg-style alias for stack backtrace.
+        
+        For details, see stacktrace().
+        """
+        return self.stacktrace(depth)
 
     def stacktrace(self, depth=None):
+        """Obtain a stack backtrace.
+
+        Currently only supported for x86 targets.
+
+        Parameters
+        ----------
+        depth : int or NoneType
+            Desired stack trace depth
+        returns:
+            list(StackTraceEntry) : list of (frame number, ebp, ret, and eip)
+        """
         arch = self._trace.getMeta('Architecture')
-        if arch not in ('i386',):
-            raise NotImplementedError('Stack trace is only available for x86')
+        if arch not in self._stacktrace_impl:
+            raise NotImplementedError('Stack trace is only available for %s' %
+                                      ','.join(self._stacktrace_impl))
 
         width = self._archWidth()
 
@@ -353,44 +369,6 @@ class QdbBuiltinsMixin:
         self._conout(header)
 
         return self._stacktrace_x86(width, depth)
-
-    def _stacktrace_x86(self, width, depth=None):
-        trace = []
-
-        ebp = self._vex('ebp')
-        eip = self._vex('eip')
-
-        trace_range = range(depth) if depth else itertools.count()
-        for n in trace_range:
-            if not ebp:
-                break
-
-            # Calculating for this iteration
-            try:
-                ret = self._vex('poi(%s+4)' % (phex(ebp)))
-            except vtrace.PlatformException as e:
-                break
-
-            # Collect trace information (numeric)
-            ent = StackTraceEntry(n, ebp, ret, eip)
-            trace.append(ent)
-
-            # Formatting/output
-            n_s = str(n).zfill(2)
-            ebp_s = phex(ebp)[2:].zfill(8)
-            ret_s = phex(ret)[2:].zfill(8)
-            eip_s = (self._getsym(eip) or self._getmodoff(eip) or
-                     phex(eip)[2:].zfill(8))
-            self._conout('%s %s %s %s' % (n_s, ebp_s, ret_s, eip_s))
-
-            # For next iteration
-            eip = ret
-            try:
-                ebp = self._vex('poi(%s)' % (phex(ebp)))
-            except vtrace.PlatformException as e:
-                break
-
-        return trace
 
     def get_exitcode(self):
         """Get the exit code, valid only if the program has terminated."""
@@ -1290,6 +1268,10 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
             '\x00'  # ...
         )
 
+        self._stacktrace_impl = {
+            'i386': self._stacktrace_x86,
+        }
+
         # Instance fields that may be reset/cleared
         self._resetDefaults()
         self._setupBuiltins()
@@ -1353,6 +1335,58 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
     def _vex(self, vexpr):
         return self._trace.parseExpression(str(vexpr))
+
+    def _stacktrace_x86(self, width, depth=None):
+        """Stack backtrace implementation for x86.
+
+        Parameters
+        ----------
+        width : int
+            Architecture width. This is obtained by the caller and as a matter
+            of implementation is expected to be passed to any
+            architecture-specific stack backtrace implementations to
+            differentiate between different modes, etc.
+        depth : int or NoneType
+            Desired stack trace depth
+        returns:
+            list(StackTraceEntry) : list of (frame number, ebp, ret, and eip)
+        """
+        trace = []
+
+        ebp = self._vex('ebp')
+        eip = self._vex('eip')
+
+        trace_range = range(depth) if depth else itertools.count()
+        for n in trace_range:
+            if not ebp:
+                break
+
+            # Calculating for this iteration
+            try:
+                ret = self._vex('poi(%s+4)' % (phex(ebp)))
+            except vtrace.PlatformException as e:
+                break
+
+            # Collect trace information (numeric)
+            ent = StackTraceEntry(n, ebp, ret, eip)
+            trace.append(ent)
+
+            # Formatting/output
+            n_s = str(n).zfill(2)
+            ebp_s = phex(ebp)[2:].zfill(8)
+            ret_s = phex(ret)[2:].zfill(8)
+            eip_s = (self._getsym(eip) or self._getmodoff(eip) or
+                     phex(eip)[2:].zfill(8))
+            self._conout('%s %s %s %s' % (n_s, ebp_s, ret_s, eip_s))
+
+            # For next iteration
+            eip = ret
+            try:
+                ebp = self._vex('poi(%s)' % (phex(ebp)))
+            except vtrace.PlatformException as e:
+                break
+
+        return trace
 
     def _retcallback_stepi(self, cb_ret=None, limit=16384):
         """Step the program counter, ignoring breakpoints, until a final return
