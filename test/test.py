@@ -544,7 +544,11 @@ def test_callback_gets_context_with_pc_and_locals_as_arg(*args, **kwargs):
 
     locs = {'marker': False}
     dbg.add_query(0x401010, callback)
-    result = dbg.run(hello_exe_path, locs)
+    try:
+        result = dbg.run(hello_exe_path, locs)
+    except QdbBpException as e:
+        print('%s: %s' % (type(e), str(e)))
+
     assert result is True
     assert locs['marker'] is True
 

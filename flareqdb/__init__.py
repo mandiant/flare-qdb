@@ -141,12 +141,7 @@ class QdbMethodsMixin:
         self._bp_unknown_fail = False
         self._stored_exception = None
         if self._init_code:
-            context = {}
-            context['pc'] = 0
-            context['trace'] = self._trace
-            context['q'] = self
-            context['qbp'] = None
-            self._dispatch_python(self._init_code, context)
+            self._eval_exprs(self._init_code, self._exprs)
 
         # If kill() is called in init code, respect it
         if self._runnable:
@@ -1319,13 +1314,13 @@ class QdbDevMixin():
                 if k in self._locals:
                     self._parameters[k] = self._locals[k]
 
-    def dispatch_callable(self, q, context):
+    def _dispatch_callable(self, query, context):
         """Evaluate expression(s) associated with this program counter."""
         # self._qdb._parameters.update(context)
         context.update(self._parameters)
 
         try:
-            self._query(self._parameters, **context)
+            query(self._parameters, **context)
 
         except Exception as e:
             # This function is called in the context of a breakpoint notify()
@@ -1345,7 +1340,6 @@ class QdbDevMixin():
             )
 
             q._halt()
-
 
 
 class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
@@ -1831,48 +1825,8 @@ class QdbBreak(vtrace.Breakpoint):
     def eval_exprs(self):
         """Evaluate expression(s) associated with this program counter."""
         q = self._qdb
-        pc = q._trace.getProgramCounter()
-
-        context = {}
-        context['pc'] = pc
-        context['trace'] = self._qdb._trace
-        context['q'] = self._qdb
-        context['qbp'] = self
-        context['exprs'] = self._qdb._exprs
-
-        if callable(self._query):
-            self.dispatch_callable(q, context)
-        else:
-            self.dispatch_python(q, context)
-
-    def _expandNonPythonAliases(self, query):
-        """Replace Python-incompatible aliases such as "?()" with real
-        functions such as "vex()".
-        """
-        for frm, to in _SPECIAL_ALIASES:
-            query = self._expandNonPythonAlias(query, frm, to)
-        return query
-
-    def _expandNonPythonAlias(self, query, frm, to):
-        """Replace a a function alias with its corresponding function."""
-        pat = frm + r'(\(.*\))'
-        rep = to + r'\1'
-        result = re.sub(pat, rep, query)
-        result = query if result is None else result
-        return result
-
-    def dispatch_python(self, q, context):
-        """Evaluate expression(s) associated with this program counter."""
-        query = ''
-
-        q._locals.update(self._qdb._parameters)
-        q._locals.update(context)
-
-        query = self._expandNonPythonAliases(self._query)
-
         try:
-            exec(query, {}, q._locals)
-
+            q._eval_exprs(self._query, self._qdb._exprs, self)
         except Exception as e:
             # This function is called in the context of a breakpoint notify()
             # routine, which itself is called by TracerBase._fireBreakpoint(),
@@ -1884,46 +1838,7 @@ class QdbBreak(vtrace.Breakpoint):
             q._bp_unknown_fail = True
             q._stored_exception = QdbBpException(
                 'Error evaluating expression',
-                query,
-                str(sys.exc_info()[1]),
-                e,
-                traceback.extract_tb(sys.exc_info()[2])
-            )
-
-            q._halt()
-
-        # We don't sync back local variable changes for callables because they
-        # use the passed-in params argument to return output values, and
-        # furthermore don't even access locals.
-        #
-        # But we DO sync back local variable changes for evaluated python text
-        # because scripters providing Python text to be evaluated will expect
-        # to be able to modify parameters directly.
-        if self._qdb._parameters:
-            for k in self._qdb._parameters:
-                if k in self._qdb._locals:
-                    self._qdb._parameters[k] = self._qdb._locals[k]
-
-    def dispatch_callable(self, q, context):
-        """Evaluate expression(s) associated with this program counter."""
-        # self._qdb._parameters.update(context)
-        context.update(self._qdb._parameters)
-
-        try:
-            self._query(self._qdb._parameters, **context)
-
-        except Exception as e:
-            # This function is called in the context of a breakpoint notify()
-            # routine, which itself is called by TracerBase._fireBreakpoint(),
-            # which will catch and print any exception, causing execution to
-            # continue. Instead of allowing this, this function will save the
-            # exception and backtrace, terminate execution, and Qdb.run() will
-            # re-raise the stored exception. The Qdb object can be used to
-            # obtain the trace that was captured at this point.
-            q._bp_unknown_fail = True
-            q._stored_exception = QdbBpException(
-                'Error in callable',
-                self._query.func_name,
+                str(self._query),
                 str(sys.exc_info()[1]),
                 e,
                 traceback.extract_tb(sys.exc_info()[2])
@@ -1941,6 +1856,7 @@ class QdbBreak(vtrace.Breakpoint):
                 self._qdb._exprs[pc]['sym'] = symbolic_addr
 
         self.eval_exprs()
+
 
 # Hexdump and data formatting helper functions
 
