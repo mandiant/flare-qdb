@@ -24,7 +24,7 @@ from collections import namedtuple
 __author__ = 'Michael Bailey'
 __copyright__ = 'Copyright (C) 2016 FireEye'
 __license__ = 'Apache License'
-__version__ = '1.0.3'
+__version__ = '1.0.4'
 
 logger = logging.getLogger(__name__)
 
