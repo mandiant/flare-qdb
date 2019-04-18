@@ -13,6 +13,7 @@ def qdb_parse_cmdline_args(console):
                         help='program and arguments to run')
     parser.add_argument('-q', help='suppress normal console output',
                         default=False, action='store_true')
+    parser.add_argument('-init', metavar='pythontext', help='Initialization')
     parser.add_argument('-at', metavar=('vexpr-pc', 'pythontext'),
                         default=[], nargs=2, action='append', help='query')
     parser.add_argument('-at-if', dest='at_if', metavar=('vexpr-pc',
@@ -62,7 +63,12 @@ def main():
         console.setLevel(logging.INFO)
 
     dbg = Qdb(console)
+
+    if args.init:
+        dbg.setInitCode(args.init)
+
     dbg.add_queries(args.at)
+
     for (a, c, e) in args.at_if:
         dbg.add_query(a, e, c)
 
