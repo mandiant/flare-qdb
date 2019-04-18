@@ -143,7 +143,7 @@ class QdbMethodsMixin:
 
         # If initialization code was specified, give it first dibs
         if self._init_code:
-            self._eval_exprs(self._init_code, self._exprs)
+            self._evaluate_code(self._init_code, self._exprs)
 
         # If kill() is called in init code, respect it
         if self._runnable:
@@ -1345,7 +1345,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
                                 str(vexpr_pc))
                 self._add_delayed_query(vexpr_pc, vexpr, conds)
 
-    def _eval_exprs(self, query, exprs=None, qbp=None):
+    def _evaluate_code(self, query, exprs=None, qbp=None):
         """Run Python or callable"""
         pc = self._trace.getProgramCounter()
         context = {}
@@ -1773,7 +1773,7 @@ class QdbBreak(vtrace.Breakpoint):
             self._callback = self.evaluate_breakpoint
         except ValueError:
             vtrace.Breakpoint.__init__(self, None, loc)
-            self._callback = self.eval_exprs_delayed
+            self._callback = self.evaluate_breakpoint_delayed
         self._conds = conds
         self._query = query
 
@@ -1803,7 +1803,7 @@ class QdbBreak(vtrace.Breakpoint):
         """Evaluate expression(s) associated with this program counter."""
         q = self._qdb
         try:
-            q._eval_exprs(self._query, self._qdb._exprs, self)
+            q._evaluate_code(self._query, self._qdb._exprs, self)
         except Exception as e:
             # This function is called in the context of a breakpoint notify()
             # routine, which itself is called by TracerBase._fireBreakpoint(),
@@ -1823,7 +1823,7 @@ class QdbBreak(vtrace.Breakpoint):
 
             q._halt()
 
-    def eval_exprs_delayed(self):
+    def evaluate_breakpoint_delayed(self):
         """Evaluate expression(s) associated with a delay-loaded breakpoint."""
         pc = self._qdb._trace.getProgramCounter()
 
