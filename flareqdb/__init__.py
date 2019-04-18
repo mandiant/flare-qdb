@@ -368,7 +368,7 @@ class QdbBuiltinsMixin:
             raise ValueError('Unhandled architecture width %d' % (width))
         self._conout(header)
 
-        return self._stacktrace_x86(width, depth)
+        return self._stacktrace_impl[arch](width, depth)
 
     def get_exitcode(self):
         """Get the exit code, valid only if the program has terminated."""
