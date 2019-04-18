@@ -356,19 +356,19 @@ class QdbBuiltinsMixin:
             raise NotImplementedError('Stack trace is only available for %s' %
                                       ','.join(self._stacktrace_impl))
 
-        width = self._archWidth()
+        archwidth = self._archWidth()
 
         self._conout_pc('Stack trace')
-        if width == 4:
+        if archwidth == 4:
             header = ' # Child-SP RetAddr  Call Site'
-        elif width == 8:
+        elif archwidth == 8:
             # Header is ready but that's it; see above NotImplementedError ;-)
             header = ' # Child-SP          RetAddr           Call Site'
         else:
-            raise ValueError('Unhandled architecture width %d' % (width))
+            raise ValueError('Unhandled architecture width %d' % (archwidth))
         self._conout(header)
 
-        return self._stacktrace_impl[arch](width, depth)
+        return self._stacktrace_impl[arch](archwidth, depth)
 
     def get_exitcode(self):
         """Get the exit code, valid only if the program has terminated."""
@@ -1337,12 +1337,12 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
     def _vex(self, vexpr):
         return self._trace.parseExpression(str(vexpr))
 
-    def _stacktrace_x86(self, width, depth=None):
+    def _stacktrace_x86(self, archwidth, depth=None):
         """Stack backtrace implementation for x86.
 
         Parameters
         ----------
-        width : int
+        archwidth : int
             Architecture width. This is obtained by the caller and as a matter
             of implementation is expected to be passed to any
             architecture-specific stack backtrace implementations to
@@ -1358,6 +1358,8 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         ebp = self._vex('ebp')
         eip = self._vex('eip')
 
+        hexwidth = 2 * archwidth
+
         trace_range = range(depth) if depth else itertools.count()
         for n in trace_range:
             if not ebp:
@@ -1365,20 +1367,20 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
             # Calculating for this iteration
             try:
-                ret = self._vex('poi(%s+4)' % (phex(ebp)))
+                ret = self._vex('poi(%s+%d)' % (phex(ebp), archwidth))
             except vtrace.PlatformException as e:
                 break
 
             # Collect trace information
             eip_s = (self._getsym(eip) or self._getmodoff(eip) or
-                     phex(eip)[2:].zfill(8))
+                     phex(eip)[2:].zfill(hexwidth))
             ent = StackTraceEntry(n, ebp, ret, eip, eip_s)
             trace.append(ent)
 
             # Formatting/output
             n_s = str(n).zfill(2)
-            ebp_s = phex(ebp)[2:].zfill(8)
-            ret_s = phex(ret)[2:].zfill(8)
+            ebp_s = phex(ebp)[2:].zfill(hexwidth)
+            ret_s = phex(ret)[2:].zfill(hexwidth)
             self._conout('%s %s %s %s' % (n_s, ebp_s, ret_s, eip_s))
 
             # For next iteration
