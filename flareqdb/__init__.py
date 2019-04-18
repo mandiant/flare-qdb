@@ -5,6 +5,7 @@
 
 from __future__ import print_function
 
+import os
 import re
 import sys
 import types
@@ -16,12 +17,14 @@ import inspect
 import logging
 import argparse
 import traceback
+import itertools
 from collections import defaultdict
+from collections import namedtuple
 
 __author__ = 'Michael Bailey'
 __copyright__ = 'Copyright (C) 2016 FireEye'
 __license__ = 'Apache License'
-__version__ = '1.0'
+__version__ = '1.0.3'
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,8 @@ UNPACK_FMTS = {
 _SPECIAL_ALIASES = [
     [r'\?', 'vex'],
 ]
+
+StackTraceEntry = namedtuple('StackTraceEntry', 'nr bp ret pc pc_s')
 
 
 class QdbBpException(Exception):
@@ -337,6 +342,44 @@ class QdbBuiltinsMixin:
         self._trace.selectThread(old_tid)
         return pcs
 
+    def k(self, depth=None):
+        """WinDbg-style alias for stack backtrace.
+        
+        For details, see stacktrace().
+        """
+        return self.stacktrace(depth)
+
+    def stacktrace(self, depth=None):
+        """Obtain a stack backtrace.
+
+        Currently only supported for x86 targets.
+
+        Parameters
+        ----------
+        depth : int or NoneType
+            Desired stack trace depth
+        returns: list(StackTraceEntry)
+            list of (frame number, ebp, ret, eip, and symbolic eip)
+        """
+        arch = self._trace.getMeta('Architecture')
+        if arch not in self._stacktrace_impl:
+            raise NotImplementedError('Stack trace is only available for %s' %
+                                      ','.join(self._stacktrace_impl))
+
+        archwidth = self._archWidth()
+
+        self._conout_pc('Stack trace')
+        if archwidth == 4:
+            header = ' # Child-SP RetAddr  Call Site'
+        elif archwidth == 8:
+            # Header is ready but that's it; see above NotImplementedError ;-)
+            header = ' # Child-SP          RetAddr           Call Site'
+        else:
+            raise ValueError('Unhandled architecture width %d' % (archwidth))
+        self._conout(header)
+
+        return self._stacktrace_impl[arch](archwidth, depth)
+
     def get_exitcode(self):
         """Get the exit code, valid only if the program has terminated."""
         return self._exitcode
@@ -451,7 +494,23 @@ class QdbBuiltinsMixin:
 
         for f in range(nframes):
             self.retcallback(None, limit)  # Until return
-            self._trace.stepi()  # And one more
+            self.stepi()  # And one more
+
+    def stepi(self):
+        self._trace.stepi()
+
+    def stepo(self):
+        op = self._trace.parseOpcode(self._trace.getProgramCounter())
+        if op.isCall():
+            next = op.va + op.size
+            id = self._trace.addBreakByAddr(next)
+            self._trace.setMode
+            self._trace.setMode('RunForever', False)
+            self._trace.run()
+            self._trace.setMode('RunForever', True)
+            self._trace.removeBreakpoint(id)
+        else:
+            self.stepi()
 
     def retwatch(self, limit=16384, steptype=StepType.stepo):
         """Step the program counter, ignoring breakpoints, until a return
@@ -703,6 +762,33 @@ class QdbBuiltinsMixin:
         self.counts[prettypc] = self.counts[prettypc] + 1
         return self.counts[prettypc]
 
+    def _getmodoff(self, vexpr_va):
+        va = self._vex(vexpr_va)
+        maps = self._trace.getMemoryMaps()
+        for (va_start, sz, p, filename) in maps:
+            if filename and (va_start < va) and (va < (va_start + sz)):
+                off = va - va_start
+                basename = os.path.splitext(os.path.basename(filename))[0]
+                return '%s+%s' % (basename, phex(off))
+
+        return None
+
+    def _getsym(self, vexpr_va):
+        """Quietly get the symbol associated with a location. Alias: ln.
+
+        No console output.
+
+        Parameters
+        ----------
+        vexpr_va : str
+            Vivisect expression indicating the virtual address for which to
+            resolve the symbol name.
+        returns:
+            str: Symbol name or None if unknown.
+        """
+        va = self._vex(vexpr_va)
+        return self._trace.getSymByAddrThunkAware(va)[0]
+
     def getsym(self, vexpr_va):
         """Get the symbol associated with a location. Alias: ln.
 
@@ -715,7 +801,7 @@ class QdbBuiltinsMixin:
             str: Symbol name or '(unknown)' if unknown.
         """
         va = self._vex(vexpr_va)
-        sym_instance = self._trace.getSymByAddrThunkAware(va)[0]
+        sym_instance = self._getsym(va)
         symname = '(unknown)' if sym_instance is None else str(sym_instance)
         self._conout_pc('Symbol for ' + str(vexpr_va) + ' = ' + phex(va) +
                         ' = ' + str(symname))
@@ -1112,8 +1198,8 @@ class QdbBuiltinsMixin:
         """
         return self.disas(vexpr_va, count, False)
 
-    def disas(self, vexpr_va, count=0, until_ret=False):
-        """Disassemble instructions.
+    def _disas(self, vexpr_va, count=0, until_ret=False, conout=False):
+        """Silently disassemble instructions.
 
         Parameters
         ----------
@@ -1132,14 +1218,16 @@ class QdbBuiltinsMixin:
         va = self._vex(vexpr_va) if vexpr_va is not None else pc
         how_many = str(count) + ' instrs ' if count else ''
 
-        self._conout_pc('Disassembling ' + how_many + 'at ' + phex(va))
+        if conout:
+            self._conout_pc('Disassembling ' + how_many + 'at ' + phex(va))
 
         if until_ret:
             not_ret = True
             while not_ret:
                 op = self._trace.parseOpcode(va)
                 instrs.append(str(op))
-                self._conout('  ' + phex(va) + ': ' + str(op))
+                if conout:
+                    self._conout('  ' + phex(va) + ': ' + str(op))
                 va += op.size
                 not_ret = not (str(op).startswith('ret ') or (str(op) ==
                                                               'ret'))
@@ -1147,10 +1235,29 @@ class QdbBuiltinsMixin:
             for i in xrange(0, count):
                 op = self._trace.parseOpcode(va)
                 instrs.append(str(op))
-                self._conout('  ' + phex(va) + ': ' + str(op))
+                if conout:
+                    self._conout('  ' + phex(va) + ': ' + str(op))
                 va += op.size
 
         return instrs
+
+    def disas(self, vexpr_va, count=0, until_ret=False):
+        """Disassemble instructions.
+
+        Parameters
+        ----------
+        vexpr_va : str
+            Vivisect expression indicating the location to start disassembly.
+        count : int
+            Number of instructions to disassemble.
+        until_ret : bool
+            Whether to disassemble until a return instruction is encountered.
+        returns : list
+            ASCII strings containing mnemonics and operands disassembled
+            starting at vexpr_va.
+        """
+        return self._disas(vexpr_va, count, until_ret, True)
+
 
 class QdbDevMixin():
     """Migrating QdbBreak's functionality for evaluating Python and callables
@@ -1263,6 +1370,10 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
             '\x00'  # ...
         )
 
+        self._stacktrace_impl = {
+            'i386': self._stacktrace_x86,
+        }
+
         # Instance fields that may be reset/cleared
         self._resetDefaults()
         self._setupBuiltins()
@@ -1329,6 +1440,61 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
     def _vex(self, vexpr):
         return self._trace.parseExpression(str(vexpr))
 
+    def _stacktrace_x86(self, archwidth, depth=None):
+        """Stack backtrace implementation for x86.
+
+        Parameters
+        ----------
+        archwidth : int
+            Architecture width. This is obtained by the caller and as a matter
+            of implementation is expected to be passed to any
+            architecture-specific stack backtrace implementations to
+            differentiate between different modes, etc.
+        depth : int or NoneType
+            Desired stack trace depth
+        returns: list(StackTraceEntry)
+            list of (frame number, ebp, ret, eip, and symbolic eip)
+
+        """
+        trace = []
+
+        ebp = self._vex('ebp')
+        eip = self._vex('eip')
+
+        hexwidth = 2 * archwidth
+
+        trace_range = range(depth) if depth else itertools.count()
+        for n in trace_range:
+            if not ebp:
+                break
+
+            # Calculating for this iteration
+            try:
+                ret = self._vex('poi(%s+%d)' % (phex(ebp), archwidth))
+            except vtrace.PlatformException as e:
+                break
+
+            # Collect trace information
+            eip_s = (self._getsym(eip) or self._getmodoff(eip) or
+                     phex(eip)[2:].zfill(hexwidth))
+            ent = StackTraceEntry(n, ebp, ret, eip, eip_s)
+            trace.append(ent)
+
+            # Formatting/output
+            n_s = str(n).zfill(2)
+            ebp_s = phex(ebp)[2:].zfill(hexwidth)
+            ret_s = phex(ret)[2:].zfill(hexwidth)
+            self._conout('%s %s %s %s' % (n_s, ebp_s, ret_s, eip_s))
+
+            # For next iteration
+            eip = ret
+            try:
+                ebp = self._vex('poi(%s)' % (phex(ebp)))
+            except vtrace.PlatformException as e:
+                break
+
+        return trace
+
     def _retcallback_stepi(self, cb_ret=None, limit=16384):
         """Step the program counter, ignoring breakpoints, until a final return
         instruction is found, and then execute cb_ret.
@@ -1368,7 +1534,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
                 logger.error('Failed to find return instruction')
                 break
 
-            self._trace.stepi()
+            self.stepi()
 
         return retval
 
@@ -1390,15 +1556,8 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
         callstack = 0
 
         while True:
+            self.stepo()
             op = self._trace.parseOpcode(self._trace.getProgramCounter())
-
-            if op.isCall():
-                next = op.va + op.size
-                id = self._trace.addBreakByAddr(next)
-                self._trace.setMode('RunForever', False)
-                self._trace.run()
-                self._trace.setMode('RunForever', True)
-                self._trace.removeBreakpoint(id)
 
             if op.isReturn():
                 if cb_ret:
@@ -1412,8 +1571,6 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
             if limit == 0:
                 logger.error('Failed to find return instruction')
                 break
-
-            self._trace.stepi()
 
         return retval
 

@@ -1,6 +1,7 @@
 # coding: utf-8
 # Copyright (C) 2016 FireEye, Inc. All Rights Reserved.
 
+import os
 import sys
 import struct
 from flareqdb import Qdb, QdbBpException, UnparkSpec
@@ -43,6 +44,8 @@ __version__ = '0.0'
      .text:0040100B 68 00 C0 40 00             push    offset aHelloWorld
                                                ; "Hello, world!\n"
      .text:00401010 E8 0D 00 00 00             call    _printf
+                                               ; _printf is at 0x401010 + 0xD
+                                               ; = 0x401022
      .text:00401015 83 C4 04                   add     esp, 4
      .text:00401018 89 45 FC                   mov     [ebp+var_4], eax
      .text:0040101B 8B 45 FC                   mov     eax, [ebp+var_4]
@@ -70,6 +73,14 @@ __version__ = '0.0'
      .text:1000100E                            Add endp
 """
 
+hello_exe_name = r'hello.exe'
+hello_exe_dir = os.path.expandvars('%TESTFILES%')
+hello_exe_path = os.path.join(hello_exe_dir, hello_exe_name)
+
+
+def phex(n):
+    return hex(n).rstrip('L')
+
 
 def test_instantiate():
     dbg = Qdb()
@@ -78,7 +89,7 @@ def test_instantiate():
 
 def test_run_no_breaks_and_exitcode():
     dbg = Qdb()
-    result = dbg.run('hello.exe')
+    result = dbg.run(hello_exe_path)
     assert result is True
     assert dbg.get_exitcode() == 14
 
@@ -190,7 +201,7 @@ def test_vexpr_nameerror():
     dbg.add_query(0x401010, "marker = vex('poi(EXP)')")
     got_exception = False
     try:
-        result = dbg.run('hello.exe', locs)
+        result = dbg.run(hello_exe_path, locs)
     except QdbBpException as e:
         got_exception = True
         ex_type_is_name_error = isinstance(e.exception, NameError)
@@ -203,7 +214,7 @@ def test_vexpr_retval():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x40101b, "marker = vex('poi(ebp-0x4)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 14
 
@@ -212,7 +223,7 @@ def test_vexpr_alias():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x40101b, "marker = ?('poi(ebp-0x4)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 14
 
@@ -222,7 +233,7 @@ def test_kill():
     locs = {'marker1': None, 'marker2': None}
     dbg.add_query(0x401010, "marker1 = kill()")
     dbg.add_query(0x40101b, "marker2 = vex('poi(ebp-0x4)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker1'] is True
     assert locs['marker2'] is None
@@ -232,7 +243,7 @@ def test_dd():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x401010, "marker = dd('poi(esp)', 1)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     # DWORD of beginning of "Hello, world!"
     assert locs['marker'][0] == struct.unpack('L', 'Hell')[0]
@@ -242,7 +253,7 @@ def test_dw():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x401010, "marker = dw('poi(esp)', 1)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     # DWORD of beginning of "Hello, world!"
     assert locs['marker'][0] == struct.unpack('H', 'He')[0]
@@ -253,7 +264,7 @@ def test_db():
     locs = {'marker': None}
     dbg.add_query(0x401010, "marker = db('poi(esp)', 1)")
     result = False
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     # DWORD of beginning of "Hello, world!"
     assert locs['marker'][0] == struct.unpack('B', 'H')[0]
@@ -264,7 +275,7 @@ def test_da():
     locs = {'marker': None}
     dbg.add_query(
         0x401010, "marker = da('poi(esp)'); print('Marker = ' + str(marker))")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     # DWORD of beginning of "Hello, world!"
     assert locs['marker'] == 'Hello, world!\n\0'
@@ -274,7 +285,7 @@ def test_disas():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x401000, "marker = disas(None, 1, False)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'][0] == 'push ebp'
 
@@ -283,7 +294,7 @@ def test_disas_alias_u():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x401000, "marker = u(None, 1)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'][0] == 'push ebp'
 
@@ -292,7 +303,7 @@ def test_disas_alias_uf():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x401000, "marker = uf(None)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'][0].startswith('push ebp')
     assert locs['marker'][1].startswith('mov ebp,esp')
@@ -313,7 +324,7 @@ def test_setreg():
     locs = {'marker': None}
     dbg.add_query(0x401015, "setreg('eax', 42);")
     dbg.add_query(0x40101b, "marker = vex('poi(ebp-0x4)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 42
 
@@ -323,7 +334,7 @@ def test_setreg_alias_r_get():
     locs = {'marker': None}
     dbg.add_query(0x401015, "marker = r('eax');")
     dbg.add_query(0x40101b, "marker = vex('poi(ebp-0x4)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 14  # Length of hello world string
 
@@ -333,7 +344,7 @@ def test_setreg_alias_r_set():
     locs = {'marker': None}
     dbg.add_query(0x401015, "r('eax', 42);")
     dbg.add_query(0x40101b, "marker = vex('poi(ebp-0x4)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 42
 
@@ -345,7 +356,7 @@ def test_memcpy():
     dbg.add_query(0x401010,
                   "memcpy('poi(esp)', 'poi(esp)+4', 4); " +
                   "marker = dd('poi(esp)', 1)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'][0] == struct.unpack('@I', 'Hello, world!'[4:8])[0]
 
@@ -359,7 +370,7 @@ def test_writemem():
     dbg.add_query(0x401010,
                   "writemem('poi(esp)', '" + s +
                   "\\x00'); marker = da('poi(esp)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == s + '\x00'
 
@@ -372,7 +383,7 @@ def test_eza_and_da():
     locs = {'marker': None}
     dbg.add_query(0x401010,
                   "eza('poi(esp)', 'Bye, world'); marker = da('poi(esp)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 'Bye, world\0'
 
@@ -385,7 +396,7 @@ def test_ezu_and_du():
     locs = {'marker': None}
     dbg.add_query(0x401010,
                   "ezu('poi(esp)', u'Bye, world'); marker = du('poi(esp)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == u'Bye, world\x00'
 
@@ -398,7 +409,7 @@ def test_ea_and_da():
     locs = {'marker': None}
     dbg.add_query(0x401010,
                   "ea('poi(esp)', 'Bye, world'); marker = da('poi(esp)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 'Bye, worldld!\n\0'
 
@@ -411,7 +422,7 @@ def test_eu_and_du():
     locs = {'marker': None}
     dbg.add_query(0x401010,
                   "eu('poi(esp)', u'Bye, world'); marker = du('poi(esp)', 3)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == u'Bye'
 
@@ -423,7 +434,7 @@ def test_ed():
     # [ebp-4] here is equal to the length of the string "Hello, world!\n"
     dbg.add_query(0x40101b, "ed('ebp-4', " + str(sentinel_value) + ")")
     dbg.add_query(0x40101e, "marker = r('eax')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == sentinel_value
 
@@ -435,7 +446,7 @@ def test_ew():
     # [ebp-4] here is equal to the length of the string "Hello, world!\n"
     dbg.add_query(0x40101b, "ew('ebp-4', " + str(sentinel_value) + ")")
     dbg.add_query(0x40101e, "marker = r('eax')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == sentinel_value
 
@@ -447,7 +458,7 @@ def test_eb1():
     # [ebp-4] here is equal to the length of the string "Hello, world!\n"
     dbg.add_query(0x40101b, "eb('ebp-4', " + str(sentinel_value) + ")")
     dbg.add_query(0x40101e, "marker = r('eax')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == sentinel_value
 
@@ -459,7 +470,7 @@ def test_eb2():
     # [ebp-4] here is equal to the length of the string "Hello, world!\n"
     dbg.add_query(0x40101b, "eb('ebp-4', '\xff\xff')")
     dbg.add_query(0x40101e, "marker = r('eax')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == sentinel_value
 
@@ -468,7 +479,7 @@ def test_getsym_invalid():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query(0x401000, "marker = getsym('eip')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == '(unknown)'
 
@@ -477,7 +488,7 @@ def test_getsym_valid():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query('kernel32.GetCommandLineA', "marker = getsym('eip')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 'kernel32.GetCommandLineA'
 
@@ -486,7 +497,7 @@ def test_getsym_alias_ln():
     dbg = Qdb()
     locs = {'marker': None}
     dbg.add_query('kernel32.GetCommandLineA', "marker = ln('eip')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 'kernel32.GetCommandLineA'
 
@@ -496,7 +507,7 @@ def test_get_pc():
     locs = {'marker': None}
     pc = 0x401000
     dbg.add_query(pc, 'marker = get_pc()')
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == pc
 
@@ -506,7 +517,7 @@ def test_get_pcs():
     locs = {'pcs': None, 'tid': None}
     pc = 0x401000
     dbg.add_query(pc, 'pcs = get_pcs(); tid = q._trace.getCurrentThread()')
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     # hello.exe is single-threaded
     for k, v in locs['pcs'].iteritems():
@@ -520,7 +531,7 @@ def test_bp():
     locs = {'marker': None}
     dbg.add_query(0x401000,
                   "bp(0x401010, 'marker = da(\\\'poi(esp)\\\', 5)')")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 'Hello'
 
@@ -533,7 +544,7 @@ def test_callback_gets_context_with_pc_and_locals_as_arg(*args, **kwargs):
 
     locs = {'marker': False}
     dbg.add_query(0x401010, callback)
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] is True
 
@@ -543,7 +554,7 @@ def test_cond_false():
     locs = {'marker': None}
     dbg.add_query(0x40101b, "marker = vex('poi(ebp-0x4)')",
                   "0 || esp && eax!=14")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] is None
 
@@ -553,7 +564,7 @@ def test_cond_true():
     locs = {'marker': None}
     dbg.add_query(0x40101b, "marker = vex('poi(ebp-0x4)')",
                   "0 or (esp and eax==14)")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
     assert locs['marker'] == 14
 
@@ -565,7 +576,7 @@ def test_park_detach_attach_unpark():
     dbg = Qdb()
     locs = {'pid': None, 'flag': None}
     dbg.add_query(0x401010, "park(); pid = detach()")
-    result = dbg.run('hello.exe', locs)
+    result = dbg.run(hello_exe_path, locs)
     assert result is True
 
     dbg = Qdb()
@@ -589,6 +600,72 @@ def test_get_push_arg():
     assert result is True
     assert locs['arg_12'] == 12
     assert locs['arg_34'] == 34
+
+
+def test_stacktrace_alias_k():
+    return _test_stacktrace("k()")
+
+
+def test_stacktrace():
+    return _test_stacktrace("stacktrace()")
+
+
+def _test_stacktrace(command="stacktrace()"):
+    dbg = Qdb()
+    locs = {'backtrace': None}
+    dbg.add_query(0x401022, 'backtrace = %s' %(command))
+    result = dbg.run(hello_exe_path, locs)
+
+    assert result is True
+    assert locs['backtrace']
+    bt = locs['backtrace']
+
+    # At least main, _printf, and one other frame
+    assert len(bt) > 2
+
+    # Stack frames numbered as expected
+    assert all([(bt[i].nr == i) for i in range(len(bt))])
+
+    # ebp direction as expected
+    assert all([(bt[i].bp < bt[i + 1].bp) for i in range(len(bt) - 1)])
+
+    # Known addresses that should be at the top of this stack frame
+    assert bt[0].pc == 0x401022
+    assert bt[0].pc_s == 'hello+0x22'
+    assert bt[1].pc == 0x40120b
+    assert bt[1].pc_s == 'hello+0x20b'
+
+
+def test_stepi():
+    dbg = Qdb()
+    locs = {'location': None}
+    dbg.add_query(0x401010, "stepi(); location = r('eip')")  # call _printf
+    result = dbg.run(hello_exe_path, locs)
+
+    assert result is True
+    assert locs['location']
+    assert locs['location'] == (0xD + 0x401015)  # At _printf
+
+
+def test_stepo():
+    dbg = Qdb()
+    locs = {'location': None}
+    dbg.add_query(0x401010, "stepo(); location = r('eip')")  # call _printf
+    result = dbg.run(hello_exe_path, locs)
+
+    assert result is True
+    assert locs['location']
+    assert locs['location'] == 0x401015  # Right after call _printf
+
+
+def test_gu():
+    dbg = Qdb()
+    locs = {'location': None}
+    dbg.add_query(0x401022, "print(hex(r('eip'))); gu(); location = r('eip'); print(hex(location))")  # At _printf
+    result = dbg.run(hello_exe_path, locs)
+    assert result is True
+    assert locs['location']
+    assert locs['location'] == 0x401015  # Right after call _printf
 
 
 def test_retwatch():
@@ -628,6 +705,6 @@ def test_rapid_fire_WILL_TAKE_A_LONG_TIME():
     dbg = Qdb()
     dbg.add_query(0x0401262, "marker += 1; kill()")
     for i in xrange(runs_expected):
-        result = dbg.run('hello.exe', locs)
+        result = dbg.run(hello_exe_path, locs)
         assert result is True
     assert locs['marker'] == runs_expected
