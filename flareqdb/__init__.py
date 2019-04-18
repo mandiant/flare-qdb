@@ -40,7 +40,7 @@ _SPECIAL_ALIASES = [
     [r'\?', 'vex'],
 ]
 
-StackTraceEntry = namedtuple('StackTraceEntry', 'nr ebp ret eip')
+StackTraceEntry = namedtuple('StackTraceEntry', 'nr bp ret pc pc_s')
 
 
 class QdbBpException(Exception):
@@ -348,8 +348,8 @@ class QdbBuiltinsMixin:
         ----------
         depth : int or NoneType
             Desired stack trace depth
-        returns:
-            list(StackTraceEntry) : list of (frame number, ebp, ret, and eip)
+        returns: list(StackTraceEntry)
+            list of (frame number, ebp, ret, eip, and symbolic eip)
         """
         arch = self._trace.getMeta('Architecture')
         if arch not in self._stacktrace_impl:
@@ -788,7 +788,8 @@ class QdbBuiltinsMixin:
         returns:
             str: Symbol name or '(unknown)' if unknown.
         """
-        sym_instance = self._getsym(vexpr_va)
+        va = self._vex(vexpr_va)
+        sym_instance = self._getsym(va)
         symname = '(unknown)' if sym_instance is None else str(sym_instance)
         self._conout_pc('Symbol for ' + str(vexpr_va) + ' = ' + phex(va) +
                         ' = ' + str(symname))
@@ -1243,7 +1244,7 @@ class QdbBuiltinsMixin:
             ASCII strings containing mnemonics and operands disassembled
             starting at vexpr_va.
         """
-        self._disas(vexpr_va, count, until_ret, True)
+        return self._disas(vexpr_va, count, until_ret, True)
 
 
 class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
@@ -1348,8 +1349,9 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
             differentiate between different modes, etc.
         depth : int or NoneType
             Desired stack trace depth
-        returns:
-            list(StackTraceEntry) : list of (frame number, ebp, ret, and eip)
+        returns: list(StackTraceEntry)
+            list of (frame number, ebp, ret, eip, and symbolic eip)
+
         """
         trace = []
 
@@ -1367,16 +1369,16 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
             except vtrace.PlatformException as e:
                 break
 
-            # Collect trace information (numeric)
-            ent = StackTraceEntry(n, ebp, ret, eip)
+            # Collect trace information
+            eip_s = (self._getsym(eip) or self._getmodoff(eip) or
+                     phex(eip)[2:].zfill(8))
+            ent = StackTraceEntry(n, ebp, ret, eip, eip_s)
             trace.append(ent)
 
             # Formatting/output
             n_s = str(n).zfill(2)
             ebp_s = phex(ebp)[2:].zfill(8)
             ret_s = phex(ret)[2:].zfill(8)
-            eip_s = (self._getsym(eip) or self._getmodoff(eip) or
-                     phex(eip)[2:].zfill(8))
             self._conout('%s %s %s %s' % (n_s, ebp_s, ret_s, eip_s))
 
             # For next iteration

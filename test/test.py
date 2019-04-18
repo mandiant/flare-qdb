@@ -1,6 +1,7 @@
 # coding: utf-8
 # Copyright (C) 2016 FireEye, Inc. All Rights Reserved.
 
+import os
 import sys
 import struct
 from flareqdb import Qdb, QdbBpException, UnparkSpec
@@ -43,6 +44,8 @@ __version__ = '0.0'
      .text:0040100B 68 00 C0 40 00             push    offset aHelloWorld
                                                ; "Hello, world!\n"
      .text:00401010 E8 0D 00 00 00             call    _printf
+                                               ; _printf is at 0x401010 + 0xD
+                                               ; = 0x401022
      .text:00401015 83 C4 04                   add     esp, 4
      .text:00401018 89 45 FC                   mov     [ebp+var_4], eax
      .text:0040101B 8B 45 FC                   mov     eax, [ebp+var_4]
@@ -70,8 +73,13 @@ __version__ = '0.0'
      .text:1000100E                            Add endp
 """
 
-hello_exe_path = r'hello.exe'
+hello_exe_name = r'hello.exe'
+hello_exe_dir = os.path.expandvars('%TESTFILES%')
+hello_exe_path = os.path.join(hello_exe_dir, hello_exe_name)
 
+
+def phex(n):
+    return hex(n).rstrip('L')
 
 
 def test_instantiate():
@@ -592,6 +600,40 @@ def test_get_push_arg():
     assert result is True
     assert locs['arg_12'] == 12
     assert locs['arg_34'] == 34
+
+
+def test_stacktrace_alias_k():
+    return _test_stacktrace("k()")
+
+
+def test_stacktrace():
+    return _test_stacktrace("stacktrace()")
+
+
+def _test_stacktrace(command="stacktrace()"):
+    dbg = Qdb()
+    locs = {'backtrace': None}
+    dbg.add_query(0x401022, 'backtrace = %s' %(command))
+    result = dbg.run(hello_exe_path, locs)
+
+    assert result is True
+    assert locs['backtrace']
+    bt = locs['backtrace']
+
+    # At least main, _printf, and one other frame
+    assert len(bt) > 2
+
+    # Stack frames numbered as expected
+    assert all([(bt[i].nr == i) for i in range(len(bt))])
+
+    # ebp direction as expected
+    assert all([(bt[i].bp < bt[i + 1].bp) for i in range(len(bt) - 1)])
+
+    # Known addresses that should be at the top of this stack frame
+    assert bt[0].pc == 0x401022
+    assert bt[0].pc_s == 'hello+0x22'
+    assert bt[1].pc == 0x40120b
+    assert bt[1].pc_s == 'hello+0x20b'
 
 
 def test_stepi():
