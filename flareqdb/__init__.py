@@ -140,6 +140,8 @@ class QdbMethodsMixin:
 
         self._bp_unknown_fail = False
         self._stored_exception = None
+
+        # If initialization code was specified, give it first dibs
         if self._init_code:
             self._eval_exprs(self._init_code, self._exprs)
 
@@ -177,6 +179,10 @@ class QdbMethodsMixin:
         function.
         """
         self.counts = defaultdict(int)
+
+    def setInitCode(self, code):
+        """Set Python text to be executed upon program execution."""
+        self._init_code = code
 
     def add_query(self, vexpr_pc, query, conds=None):
         """Add a single permanent query with an optional conditional
@@ -1254,95 +1260,7 @@ class QdbBuiltinsMixin:
         return self._disas(vexpr_va, count, until_ret, True)
 
 
-class QdbDevMixin():
-    """Migrating QdbBreak's functionality for evaluating Python and callables
-    out of QdbBreak and into Qdb to be able to run Python (or callables) upon
-    loading a program but before letting it run free.
-    """
-    def setInitCode(self, code):
-        self._init_code = code
-
-    def _eval_exprs(self, query, exprs=None, qbp=None):
-        pc = self._trace.getProgramCounter()
-        context = {}
-        context['pc'] = pc
-        context['trace'] = self._trace
-        context['q'] = self
-        context['qbp'] = qbp  # Qdb Breakpoint
-        context['exprs'] = exprs
-
-        if callable(query):
-            self._dispatch_callable(query, context)
-        else:
-            self._dispatch_python(query, context)
-
-    def _expandNonPythonAliases(self, query):
-        """Replace Python-incompatible aliases such as "?()" with real
-        functions such as "vex()".
-        """
-        for frm, to in _SPECIAL_ALIASES:
-            query = self._expandNonPythonAlias(query, frm, to)
-        return query
-
-    def _expandNonPythonAlias(self, query, frm, to):
-        """Replace a a function alias with its corresponding function."""
-        pat = frm + r'(\(.*\))'
-        rep = to + r'\1'
-        result = re.sub(pat, rep, query)
-        result = query if result is None else result
-        return result
-
-    def _dispatch_python(self, query, context):
-        """Evaluate expression(s) associated with this program counter."""
-
-        self._locals.update(self._parameters)
-        self._locals.update(context)
-
-        query = self._expandNonPythonAliases(query)
-
-        exec(query, {}, self._locals)
-
-        # We don't sync back local variable changes for callables because they
-        # use the passed-in params argument to return output values, and
-        # furthermore don't even access locals.
-        #
-        # But we DO sync back local variable changes for evaluated python text
-        # because scripters providing Python text to be evaluated will expect
-        # to be able to modify parameters directly.
-        if self._parameters:
-            for k in self._parameters:
-                if k in self._locals:
-                    self._parameters[k] = self._locals[k]
-
-    def _dispatch_callable(self, query, context):
-        """Evaluate expression(s) associated with this program counter."""
-        # self._qdb._parameters.update(context)
-        context.update(self._parameters)
-
-        try:
-            query(self._parameters, **context)
-
-        except Exception as e:
-            # This function is called in the context of a breakpoint notify()
-            # routine, which itself is called by TracerBase._fireBreakpoint(),
-            # which will catch and print any exception, causing execution to
-            # continue. Instead of allowing this, this function will save the
-            # exception and backtrace, terminate execution, and Qdb.run() will
-            # re-raise the stored exception. The Qdb object can be used to
-            # obtain the trace that was captured at this point.
-            q._bp_unknown_fail = True
-            q._stored_exception = QdbBpException(
-                'Error in callable',
-                self._query.func_name,
-                str(sys.exc_info()[1]),
-                e,
-                traceback.extract_tb(sys.exc_info()[2])
-            )
-
-            q._halt()
-
-
-class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
+class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
     """Query-oriented debugger object."""
 
     def __init__(self, conlogger=None):
@@ -1355,7 +1273,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
             # If this gets any more elaborate (such as 32- and 64-bit support
             # for a Sleep() call to take it easy on the CPU), then it should be
             # replaced with a vstruct.
-            '\xeb\xfe'  # JMP -3
+            '\xeb\xfe'  # JMP -2
             '\x00'  # Align 8
             '\x00'  # ...
             '\x00'  # ...
@@ -1426,6 +1344,65 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin, QdbDevMixin):
                 logging.warning('Adding delayed breakpoint for ' +
                                 str(vexpr_pc))
                 self._add_delayed_query(vexpr_pc, vexpr, conds)
+
+    def _eval_exprs(self, query, exprs=None, qbp=None):
+        """Run Python or callable"""
+        pc = self._trace.getProgramCounter()
+        context = {}
+        context['pc'] = pc
+        context['trace'] = self._trace
+        context['q'] = self
+        context['qbp'] = qbp  # Qdb Breakpoint
+        context['exprs'] = exprs
+
+        if callable(query):
+            self._dispatch_callable(query, context)
+        else:
+            self._dispatch_python(query, context)
+
+    def _expandNonPythonAliases(self, query):
+        """Replace Python-incompatible aliases such as "?()" with real
+        functions such as "vex()".
+        """
+        for frm, to in _SPECIAL_ALIASES:
+            query = self._expandNonPythonAlias(query, frm, to)
+        return query
+
+    def _expandNonPythonAlias(self, query, frm, to):
+        """Replace a a function alias with its corresponding function."""
+        pat = frm + r'(\(.*\))'
+        rep = to + r'\1'
+        result = re.sub(pat, rep, query)
+        result = query if result is None else result
+        return result
+
+    def _dispatch_python(self, query, context):
+        """Evaluate Python text."""
+
+        self._locals.update(self._parameters)
+        self._locals.update(context)
+
+        query = self._expandNonPythonAliases(query)
+
+        exec(query, {}, self._locals)
+
+        # We don't sync back local variable changes for callables because they
+        # use the passed-in params argument to return output values, and
+        # furthermore don't even access locals.
+        #
+        # But we DO sync back local variable changes for evaluated python text
+        # because scripters providing Python text to be evaluated will expect
+        # to be able to modify parameters directly.
+        if self._parameters:
+            for k in self._parameters:
+                if k in self._locals:
+                    self._parameters[k] = self._locals[k]
+
+    def _dispatch_callable(self, query, context):
+        """Evaluate a callable."""
+        # self._qdb._parameters.update(context)
+        context.update(self._parameters)
+        query(self._parameters, **context)
 
     def _halt(self):
         self._trace.setMode('RunForever', False)
@@ -1793,7 +1770,7 @@ class QdbBreak(vtrace.Breakpoint):
         self._qdb = qdb_
         try:
             vtrace.Breakpoint.__init__(self, int(loc))
-            self._callback = self.eval_exprs
+            self._callback = self.evaluate_breakpoint
         except ValueError:
             vtrace.Breakpoint.__init__(self, None, loc)
             self._callback = self.eval_exprs_delayed
@@ -1822,7 +1799,7 @@ class QdbBreak(vtrace.Breakpoint):
         if do_callback:
             self._callback()
 
-    def eval_exprs(self):
+    def evaluate_breakpoint(self):
         """Evaluate expression(s) associated with this program counter."""
         q = self._qdb
         try:
@@ -1855,7 +1832,7 @@ class QdbBreak(vtrace.Breakpoint):
                 self._qdb._exprs[pc] = {}
                 self._qdb._exprs[pc]['sym'] = symbolic_addr
 
-        self.eval_exprs()
+        self.evaluate_breakpoint()
 
 
 # Hexdump and data formatting helper functions

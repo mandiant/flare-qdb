@@ -87,6 +87,15 @@ def test_instantiate():
     assert dbg is not None
 
 
+def test_initcode():
+    dbg = Qdb()
+    locs = {'marker': None}
+    dbg.setInitCode('marker = 12345')
+    result = dbg.run(hello_exe_path, locs)
+    assert locs['marker'] is not None
+    assert locs['marker'] == 12345
+
+
 def test_run_no_breaks_and_exitcode():
     dbg = Qdb()
     result = dbg.run(hello_exe_path)
