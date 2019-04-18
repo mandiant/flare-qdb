@@ -13,6 +13,8 @@ def qdb_parse_cmdline_args(console):
                         help='program and arguments to run')
     parser.add_argument('-q', help='suppress normal console output',
                         default=False, action='store_true')
+    parser.add_argument('-attach', metavar='pid', type=int,
+                        help='Process to attach to')
     parser.add_argument('-init', metavar='pythontext', help='Initialization')
     parser.add_argument('-at', metavar=('vexpr-pc', 'pythontext'),
                         default=[], nargs=2, action='append', help='query')
@@ -27,11 +29,14 @@ def qdb_parse_cmdline_args(console):
 
     args = parser.parse_args()
 
+    print('not args.cmdline = %s' % (str(not args.cmdline)))
+    print('not args.attach = %s' % (str(not args.attach)))
+
     if args.help_builtins:
         console.info(help(QdbBuiltinsMixin))
         raise SystemExit
-    elif not args.cmdline:
-        print('A cmdline is required')
+    elif bool(args.cmdline) == bool(args.attach):
+        print('A cmdline or an -attach argument is required (but not both)')
         print('')
         parser.print_help()
         raise SystemExit
@@ -73,7 +78,11 @@ def main():
         dbg.add_query(a, e, c)
 
     try:
-        dbg.run(args.cmdline)
+        if args.attach:
+            dbg.attach(args.attach)
+            dbg.run()
+        else:
+            dbg.run(args.cmdline)
     except QdbBpException as e:
         console.error(str(e))
         for s in e.backtrace:
