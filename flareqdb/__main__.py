@@ -29,9 +29,6 @@ def qdb_parse_cmdline_args(console):
 
     args = parser.parse_args()
 
-    print('not args.cmdline = %s' % (str(not args.cmdline)))
-    print('not args.attach = %s' % (str(not args.attach)))
-
     if args.help_builtins:
         console.info(help(QdbBuiltinsMixin))
         raise SystemExit
