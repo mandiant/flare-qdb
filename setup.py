@@ -30,6 +30,18 @@ setup(
     url="http://github.com/fireeye/flare-qdb/",
     packages=['flareqdb', 'flareqdb.scripts'],
     data_files=[
+        ('flareqdb/i386',
+            [
+                'flareqdb/scripts/32bit/dbghelp.dll',
+                'flareqdb/scripts/32bit/symsrv.dll',
+            ]
+        ),
+        ('flareqdb/amd64',
+            [
+                'flareqdb/scripts/64bit/dbghelp.dll',
+                'flareqdb/scripts/64bit/symsrv.dll',
+            ]
+        ),
         ('flareqdb/scripts/32bit',
             [
                 'flareqdb/scripts/32bit/dbghelp.dll',

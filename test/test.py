@@ -699,6 +699,17 @@ def test_retset():
     assert locs['marker'] == 3
 
 
+def test_syms():
+    cmdline = 'cmd /c net helpmsg 0'
+    dbg = Qdb()
+    locs = {'marker': None}
+    dbg.setInitCode("loadSyms()")
+    dbg.add_query('cmd.Dispatch', 'marker = True')
+    dbg.run(cmdline, locs)
+    assert locs['marker']
+    assert locs['marker'] is True
+
+
 def test_retset():
     pass
 

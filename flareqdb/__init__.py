@@ -18,8 +18,10 @@ import logging
 import argparse
 import traceback
 import itertools
-from collections import defaultdict
 from collections import namedtuple
+from collections import defaultdict
+import vtrace.platforms.win32 as vpwin
+import envi.symstore.resolver as e_resolver
 
 __author__ = 'Michael Bailey'
 __copyright__ = 'Copyright (C) 2016 FireEye'
@@ -27,7 +29,6 @@ __license__ = 'Apache License'
 __version__ = '1.0.5'
 
 logger = logging.getLogger(__name__)
-
 
 ONE_MB = 1024 * 1024
 UNPACK_FMTS = {
@@ -39,6 +40,34 @@ UNPACK_FMTS = {
 _SPECIAL_ALIASES = [
     [r'\?', 'vex'],
 ]
+
+DEFAULT_SYMPATH = r'SRV*C:\Symbols*http://msdl.microsoft.com/download/symbols'
+
+class SYMBOL_INFO(ctypes.Structure):
+    _fields_ = [
+        ('SizeOfStruct', ctypes.wintypes.ULONG),  # 1104
+        ('TypeIndex', ctypes.wintypes.ULONG),
+        ('Reserved', ctypes.c_int64 * 2),
+        ('Index', ctypes.wintypes.ULONG),
+        ('Size', ctypes.wintypes.ULONG),
+        ('ModBase', ctypes.c_int64),
+        ('Flags', ctypes.wintypes.ULONG),
+        ('Value', ctypes.c_int64),
+        ('Address', ctypes.c_int64),
+        ('Register', ctypes.wintypes.ULONG),
+        ('Scope', ctypes.wintypes.ULONG),
+        ('Tag', ctypes.wintypes.ULONG),
+        ('NameLen', ctypes.wintypes.ULONG),
+        ('MaxNameLen', ctypes.wintypes.ULONG),
+        ('Name', ctypes.c_char * 1024),
+    ]
+
+PSYMBOL_INFO = ctypes.POINTER(SYMBOL_INFO)
+
+PSYM_ENUMERATESYMBOLS_CALLBACK = ctypes.WINFUNCTYPE(ctypes.c_bool,
+                                                    PSYMBOL_INFO,
+                                                    ctypes.c_ulong,
+                                                    ctypes.c_void_p)
 
 StackTraceEntry = namedtuple('StackTraceEntry', 'nr bp ret pc pc_s')
 
@@ -83,7 +112,6 @@ class StepType:
     """
 
     stepo, stepi = range(2)
-
 
 class QdbMethodsMixin:
     """Instance methods most likely to be used in a script for setting up a
@@ -130,20 +158,20 @@ class QdbMethodsMixin:
         if not self._trace:
             self._prepareTrace(lambda trace: trace.execute(cmdline))
 
-        self._parameters = parameters
-        self._add_queries_ephemeral()
-
         if cmdline:
             self._conout('Running: ' + str(cmdline))
         else:
             self._conout('Running: PID ' + str(self._trace.getPid()))
 
+        self._parameters = parameters
         self._bp_unknown_fail = False
         self._stored_exception = None
 
         # If initialization code was specified, give it first dibs
         if self._init_code:
-            self._evaluate_code(self._init_code, self._exprs)
+            self._evaluate_code(self._init_code)
+
+        self._add_queries_ephemeral()
 
         # If kill() is called in init code, respect it
         if self._runnable:
@@ -763,6 +791,15 @@ class QdbBuiltinsMixin:
         self.counts[prettypc] = self.counts[prettypc] + 1
         return self.counts[prettypc]
 
+    def loadSyms(self, modspec=None, path_dbghelp=None, sympath=None):
+        if modspec and isinstance(modspec, basestring):
+            self._loadSyms(modspec, path_dbghelp, sympath, False)
+        else:
+            if not modspec:
+                modspec = [x.name for x in self._trace.getSymList()]
+            for modname in modspec:
+                self._loadSyms(modname, path_dbghelp, sympath, False)
+
     def _getmodoff(self, vexpr_va):
         va = self._vex(vexpr_va)
         maps = self._trace.getMemoryMaps()
@@ -771,6 +808,18 @@ class QdbBuiltinsMixin:
                 off = va - va_start
                 basename = os.path.splitext(os.path.basename(filename))[0]
                 return '%s+%s' % (basename, phex(off))
+
+        return None
+
+    def getmodname(self, vexpr_va):
+        va = self._vex(vexpr_va)
+        maps = self._trace.getMemoryMaps()
+        for (va_start, sz, p, filename) in maps:
+            if (va_start < va) and (va < (va_start + sz)):
+                if filename:
+                    return os.path.splitext(os.path.basename(filename))[0]
+                else:
+                    return None
 
         return None
 
@@ -787,8 +836,28 @@ class QdbBuiltinsMixin:
         returns:
             str: Symbol name or None if unknown.
         """
+        sym = None
         va = self._vex(vexpr_va)
-        return self._trace.getSymByAddrThunkAware(va)[0]
+
+        # First, try the direct approach
+        sym = self._trace.getSymByAddrThunkAware(va)[0]
+
+        # Second, go for nearest
+        if not sym:
+            modname = self.getmodname(va)
+            if modname:
+                mod = self._trace.getSymByName(modname)
+                if mod:
+                    sym = mod.getSymByAddr(va, False)
+                    if sym is not None:
+                        off = va - sym.value
+                        sym = '%s+%s' % (sym.name, hex(off).rstrip('L'))
+
+        # Last, try for mod+offset
+        if not sym:
+            sym = self._getmodoff(va)
+
+        return sym
 
     def getsym(self, vexpr_va):
         """Get the symbol associated with a location. Alias: ln.
@@ -1295,6 +1364,8 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         # Logging based on :quiet:
         self._con = conlogger
 
+        self.dbghelp = None
+
     def _resetDefaults(self):
         self._trace = None
         self._runnable = True
@@ -1344,6 +1415,125 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
                 logging.warning('Adding delayed breakpoint for ' +
                                 str(vexpr_pc))
                 self._add_delayed_query(vexpr_pc, vexpr, conds)
+
+    def _preLoadSyms(self, path_dbghelp=None, sympath=None):
+        self.dbghelp = None
+
+        arch = self._trace.getMeta('Architecture')
+
+        if not sympath:
+            self.sympath = DEFAULT_SYMPATH
+
+        if not path_dbghelp:
+            the_dir = os.path.dirname(os.path.realpath(__file__))
+            path_dbghelp = os.path.join(the_dir, arch, 'dbghelp.dll')
+            self._conout('Trying dbghelp from %s' % (path_dbghelp))
+
+        try:
+            self.dbghelp = ctypes.WinDLL(path_dbghelp)
+        except WindowsError as e:
+            if e.winerror == 126:
+                print(str(e))
+                raise
+            elif e.winerror == 193:
+                self._conout(str(e))
+                self._conout('Did we try to load a 64-bit dbghelp.dll in a '
+                             '32-bit Python (or vice-versa)?')
+                raise
+            else:
+                raise
+
+        self.dbghelp.SymLoadModuleEx.argtypes = [ctypes.wintypes.HANDLE,
+                                                 ctypes.wintypes.HANDLE,
+                                                 ctypes.c_char_p,
+                                                 ctypes.c_char_p,
+                                                 ctypes.c_int64,
+                                                 ctypes.wintypes.DWORD,
+                                                 ctypes.c_void_p,
+                                                 ctypes.wintypes.DWORD,
+                                                ]
+
+        self.dbghelp.SymEnumSymbols.argtypes = [ctypes.wintypes.HANDLE,
+                                                ctypes.c_int64,
+                                                ctypes.c_char_p,
+                                                PSYM_ENUMERATESYMBOLS_CALLBACK,
+                                                ctypes.c_void_p,
+                                               ]
+
+    def _loadSyms(self, modname, path_dbghelp, sympath, raise_on_fail):
+        """Load symbols for a loaded module."""
+        # Emulating dbh.exe, accommodating 32-bit argument to SymLoadModuleEx
+        fakebase = 0x1000000
+
+        # Emulating dbh.exe, turns out unnecessary, but TIL I can specify a TID
+        hProcess = ctypes.windll.kernel32.GetCurrentThreadId()
+
+        mask = u''  # Emulating dbh.exe
+
+        if not self.dbghelp:
+            self._preLoadSyms(path_dbghelp, sympath)
+
+        def handle_err(msg):
+            if raise_on_fail:
+                raise RuntimeError(msg)
+            else:
+                self._conout(msg)
+                return False
+
+        self._conout('Loading symbols for %s' % (modname))
+
+        # Find the requested module in the trace object
+        mod = self._trace.getSymByName(modname)
+        if not mod:
+            return handle_err('Module %s is not loaded' % (modname))
+
+        real_base = mod.baseaddr
+        modfilename = mod.fname
+
+        # mod.fname's always None, so find backing filename through memory maps
+        if not modfilename:
+            maps = self._trace.getMemoryMaps()
+            for (va, sz, p, filename) in maps:
+                if filename and (va <= real_base) and (real_base < (va + sz)):
+                    modfilename = filename.encode('ascii')
+
+        if not modfilename:
+            return handle_err('Cannot find backing filename for module %s' %
+                              (modname))
+
+        opts = self.dbghelp.SymGetOptions()
+        # So you can use SysInternals DbgView to troubleshoot
+        opts |= vpwin.SYMOPT_DEBUG
+        self.dbghelp.SymSetOptions(opts)
+
+        ok = self.dbghelp.SymInitialize(hProcess, self.sympath, False)
+        if not ok:
+            return handle_err('SymInitialize failed, %d' %
+                              (ctypes.GetLastError()))
+
+        modbase_loaded = self.dbghelp.SymLoadModuleEx(hProcess, 0, modfilename,
+                                                 ctypes.c_char_p(None),
+                                                 fakebase, 0, 0, 0)
+        if not modbase_loaded:
+            return handle_err('SymLoadModuleEx failed, %d' %
+                              (ctypes.GetLastError()))
+
+        def EnumSymsCallback(pSymInfo, SymbolSize, UserContext):
+            si = pSymInfo.contents
+            # Adjust for fake base
+            va_actual = si.Address - si.ModBase + real_base
+            vs = e_resolver.Symbol(si.Name, va_actual, si.Size)
+            mod.addSymbol(vs)
+            return True
+
+        c_enum_callback = PSYM_ENUMERATESYMBOLS_CALLBACK(EnumSymsCallback)
+
+        ok = self.dbghelp.SymEnumSymbols(hProcess, modbase_loaded, mask,
+                                         c_enum_callback, 0)
+
+        self.dbghelp.SymUnloadModule(hProcess, fakebase)
+
+        return True
 
     def _evaluate_code(self, query, exprs=None, qbp=None):
         """Run Python or callable"""
