@@ -1665,6 +1665,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         eip = self._vex('eip')
 
         ret = self._get_pre_prolog_saved_ret_x86()
+        in_prolog_first_iteration = bool(ret)
 
         trace_range = range(depth) if depth else itertools.count()
         for n in trace_range:
@@ -1672,7 +1673,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
                 break
 
             # Calculating for this iteration
-            if not ret:
+            if not in_prolog_first_iteration:
                 try:
                     ret = self._vex('poi(%s+%d)' % (phex(ebp), archwidth))
                 except vtrace.PlatformException as e:
@@ -1692,11 +1693,14 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
             # For next iteration
             eip = ret
-            ret = None
-            try:
-                ebp = self._vex('poi(%s)' % (phex(ebp)))
-            except vtrace.PlatformException as e:
-                break
+
+            if in_prolog_first_iteration:
+                in_prolog_first_iteration = False
+            else:
+                try:
+                    ebp = self._vex('poi(%s)' % (phex(ebp)))
+                except vtrace.PlatformException as e:
+                    break
 
         return trace
 
