@@ -525,21 +525,23 @@ class QdbBuiltinsMixin:
             self.retcallback(None, limit)  # Until return
             self.stepi()  # And one more
 
-    def stepi(self):
-        self._trace.stepi()
+    def stepi(self, n=1):
+        for i in range(n):
+            self._trace.stepi()
 
-    def stepo(self):
-        op = self._trace.parseOpcode(self._trace.getProgramCounter())
-        if op.isCall():
-            next = op.va + op.size
-            id = self._trace.addBreakByAddr(next)
-            self._trace.setMode
-            self._trace.setMode('RunForever', False)
-            self._trace.run()
-            self._trace.setMode('RunForever', True)
-            self._trace.removeBreakpoint(id)
-        else:
-            self.stepi()
+    def stepo(self, n=1):
+        for i in range(n):
+            op = self._trace.parseOpcode(self._trace.getProgramCounter())
+            if op.isCall():
+                next = op.va + op.size
+                id = self._trace.addBreakByAddr(next)
+                self._trace.setMode
+                self._trace.setMode('RunForever', False)
+                self._trace.run()
+                self._trace.setMode('RunForever', True)
+                self._trace.removeBreakpoint(id)
+            else:
+                self.stepi()
 
     def retwatch(self, limit=16384, steptype=StepType.stepo):
         """Step the program counter, ignoring breakpoints, until a return
@@ -851,7 +853,7 @@ class QdbBuiltinsMixin:
                     sym = mod.getSymByAddr(va, False)
                     if sym is not None:
                         off = va - sym.value
-                        sym = '%s+%s' % (sym.name, hex(off).rstrip('L'))
+                        sym = '%s.%s+%s' % (modname, sym.name, phex(off))
 
         # Last, try for mod+offset
         if not sym:
@@ -1601,6 +1603,44 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
     def _vex(self, vexpr):
         return self._trace.parseExpression(str(vexpr))
 
+    def _get_pre_prolog_saved_ret_x86(self):
+        """Determine if we are in the prolog and return saved ret accordingly.
+        
+        A typical Microsoft prolog including the 2-byte nop, annotated with
+        where to find the saved return value:
+
+                            ; This is CreateProcessW (aka CreateProcessWStub)
+            mov edi,edi     ; poi(esp)
+            push ebp        ; poi(esp)
+            mov ebp,esp     ; poi(esp+4)
+            pop ebp         ; Not in the prolog anymore, home free
+            jmp dword [0x74071428]
+
+        Before the prolog, EBP is off limits because it refers to the previous
+        stack frame, and using that frame to determine the saved return address
+        would result in skipping over (omitting) the caller of the function we
+        are in.
+
+        Note that in the specific example above, Microsoft's API stub has a
+        `pop ebp` which causes this second-trace-frame-omission problem to
+        occur despite these efforts. But this solution is good enough for me
+        because I tested, and WinDbg suffers the same problem.
+
+        Who knew stack traces could be so interesting! Ha ha!
+        """
+        eip = self._vex('eip')
+        instrs = self._disas(eip, 5)
+
+        if str(instrs[0]) == 'mov ebp,esp':
+            return self._vex('poi(esp+4)')
+
+        for i in range(4):
+            if ((str(instrs[i]) == 'push ebp') and
+                    (str(instrs[i + 1]) == 'mov ebp,esp')):
+                return self._vex('poi(esp)')
+
+        return None
+
     def _stacktrace_x86(self, archwidth, depth=None):
         """Stack backtrace implementation for x86.
 
@@ -1617,12 +1657,14 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
             list of (frame number, ebp, ret, eip, and symbolic eip)
 
         """
+        hexwidth = 2 * archwidth
+
         trace = []
 
         ebp = self._vex('ebp')
         eip = self._vex('eip')
 
-        hexwidth = 2 * archwidth
+        ret = self._get_pre_prolog_saved_ret_x86()
 
         trace_range = range(depth) if depth else itertools.count()
         for n in trace_range:
@@ -1630,10 +1672,11 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
                 break
 
             # Calculating for this iteration
-            try:
-                ret = self._vex('poi(%s+%d)' % (phex(ebp), archwidth))
-            except vtrace.PlatformException as e:
-                break
+            if not ret:
+                try:
+                    ret = self._vex('poi(%s+%d)' % (phex(ebp), archwidth))
+                except vtrace.PlatformException as e:
+                    break
 
             # Collect trace information
             eip_s = (self._getsym(eip) or self._getmodoff(eip) or
@@ -1649,6 +1692,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
             # For next iteration
             eip = ret
+            ret = None
             try:
                 ebp = self._vex('poi(%s)' % (phex(ebp)))
             except vtrace.PlatformException as e:
