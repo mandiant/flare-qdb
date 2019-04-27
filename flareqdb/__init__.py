@@ -120,7 +120,7 @@ class QdbMethodsMixin:
     These are not aliased as unbound methods in the namespace.
     """
 
-    def attach(self, pid):
+    def attach(self, pid, parameters={}):
         """Attach to pid, add queries, and execute.
 
         Parameters
@@ -133,7 +133,17 @@ class QdbMethodsMixin:
         if self._trace is not None:
             return False
 
-        self._prepareTrace(lambda trace: trace.attach(pid))
+        self._parameters = parameters
+        self._bp_unknown_fail = False
+        self._stored_exception = None
+
+        self._prepareTraceAttach(pid)
+
+        # If initialization code was specified, give it first dibs
+        if self._init_code:
+            self._init_attach = True
+            self._evaluate_code(self._init_code)
+            self._init_attach = False
 
         self._conout('Attached to PID ' + str(pid))
 
@@ -155,13 +165,13 @@ class QdbMethodsMixin:
         if not cmdline and not self._trace:
             raise ValueError('Cannot run unattached qdb without cmdline')
 
-        if not self._trace:
-            self._prepareTrace(lambda trace: trace.execute(cmdline))
-
         if cmdline:
             self._conout('Running: ' + str(cmdline))
         else:
             self._conout('Running: PID ' + str(self._trace.getPid()))
+
+        if not self._trace:
+            self._prepareTrace(lambda trace: trace.execute(cmdline))
 
         self._parameters = parameters
         self._bp_unknown_fail = False
@@ -1368,6 +1378,19 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
         self.dbghelp = None
 
+        # A superficial fix for a deep, deep issue.
+        #
+        # Upon attaching via attach() instead of running:
+        # * No thread is selected by default
+        # * Consequently, no register context is defined/available
+        # * Selecting a thread requires breaking
+        # * sendBreak requires setting self.phandle (platforms\win32.py forgot)
+        # * sendBreak doesn't clear running
+        #
+        # Furthermore, if you rectify those issues, you still wind up with
+        # more issues: detach() will requireNotRunning(), etc.
+        self._init_attach = False
+
     def _resetDefaults(self):
         self._trace = None
         self._runnable = True
@@ -1377,6 +1400,14 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         self._locals = {}
         self._bp_unknown_fail = False
         self._stored_exception = None
+
+    def _prepareTraceAttach(self, pid):
+        self._exitcode = None
+        self._trace = vtrace.getTrace()
+        self._trace.setMode('NonBlocking', True)
+        self._trace.attach(pid)
+        self._trace.setMode('NonBlocking', False)
+        self._trace.setMode('RunForever', True)  # Requires an attached trace
 
     def _prepareTrace(self, callback):
         self._exitcode = None
@@ -1539,7 +1570,10 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
     def _evaluate_code(self, query, exprs=None, qbp=None):
         """Run Python or callable"""
-        pc = self._trace.getProgramCounter()
+        pc = 0
+        if not self._init_attach:
+            pc = self._trace.getProgramCounter()
+
         context = {}
         context['pc'] = pc
         context['trace'] = self._trace
@@ -1816,7 +1850,9 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         """Return the symbolic name specified on the command line corresponding
         to this program counter value, if any.
         """
-        pc = self._trace.getProgramCounter()
+        pc = 0
+        if not self._init_attach:
+            pc = self._trace.getProgramCounter()
 
         ret = phex(pc)
         try:
