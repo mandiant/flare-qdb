@@ -358,6 +358,9 @@ class QdbBuiltinsMixin:
         self._conout_pc(str(vexpr) + ' = ' + phex_dec(result))
         return result
 
+    def get_arch(self):
+        return self._trace.getMeta('Architecture')
+
     def get_pc(self):
         """Get the program counter of the currently selected thread within the
         debuggee.
@@ -400,7 +403,7 @@ class QdbBuiltinsMixin:
         returns: list(StackTraceEntry)
             list of (frame number, ebp, ret, eip, and symbolic eip)
         """
-        arch = self._trace.getMeta('Architecture')
+        arch = self.get_arch()
         if arch not in self._stacktrace_impl:
             raise NotImplementedError('Stack trace is only available for %s' %
                                       ','.join(self._stacktrace_impl))
@@ -468,7 +471,7 @@ class QdbBuiltinsMixin:
         Assumes i386.
         Assumes the prolog has not yet been executed.
         """
-        return self._vex('poi(esp)')
+        return self._vex('poi(%s)' % (self._archStackRegName()))
 
     def get_push_arg(self, argno):
         """Get argument from stack.
@@ -1837,14 +1840,20 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         # Vivisect does not currently support freeMemory / platformFreeMemory,
         # so no cleanup will be done here.
 
+    def _archStackRegName(self):
+        if self.get_arch() == 'i386':
+            return 'esp'
+        else:
+            return 'rsp'
+
     def _archRetRegName(self):
-        if self._trace.getMeta('Architecture') == 'i386':
+        if self.get_arch() == 'i386':
             return 'eax'
         else:
             return 'rax'
 
     def _archWidth(self):
-        return 4 if self._trace.getMeta('Architecture') == 'i386' else 8
+        return 4 if self.get_arch() == 'i386' else 8
 
     def _pretty_pc(self):
         """Return the symbolic name specified on the command line corresponding
