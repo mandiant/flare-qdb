@@ -72,6 +72,23 @@ PSYM_ENUMERATESYMBOLS_CALLBACK = ctypes.WINFUNCTYPE(ctypes.c_bool,
 StackTraceEntry = namedtuple('StackTraceEntry', 'nr bp ret pc pc_s')
 
 
+def shim_getSymList(self):
+    """
+    Runtime override for method in `envi\symstore\resolver.py` that encounters
+    an exception when attempting to enumerate certain DLLs/symbols.
+
+    Return a list of the symbols which are contained in this resolver.
+    """
+    retval = []
+
+    for name in self.symnames.keys():
+        try:
+            retval.append(self.getSymByName(name))
+        except AttributeError:
+            pass
+
+    return retval
+
 class QdbBpException(Exception):
     """In-breakpoint exception class.
 
@@ -1407,6 +1424,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
     def _prepareTraceAttach(self, pid):
         self._exitcode = None
         self._trace = vtrace.getTrace()
+        self._trace.getSymList = types.MethodType(shim_getSymList, self._trace)
         self._trace.setMode('NonBlocking', True)
         self._trace.attach(pid)
         self._trace.setMode('NonBlocking', False)
@@ -1415,6 +1433,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
     def _prepareTrace(self, callback):
         self._exitcode = None
         self._trace = vtrace.getTrace()
+        self._trace.getSymList = types.MethodType(shim_getSymList, self._trace)
         self._trace.setMode('NonBlocking', False)
         callback(self._trace)
         self._trace.setMode('RunForever', True)  # Requires an attached trace
