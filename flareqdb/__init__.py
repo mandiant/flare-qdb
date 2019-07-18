@@ -386,7 +386,7 @@ class QdbBuiltinsMixin:
 
     def k(self, depth=None):
         """WinDbg-style alias for stack backtrace.
-        
+
         For details, see stacktrace().
         """
         return self.stacktrace(depth)
