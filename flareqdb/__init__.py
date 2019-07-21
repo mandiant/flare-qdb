@@ -26,7 +26,7 @@ import envi.symstore.resolver as e_resolver
 __author__ = 'Michael Bailey'
 __copyright__ = 'Copyright (C) 2016 FireEye'
 __license__ = 'Apache License'
-__version__ = '1.0.5'
+__version__ = '1.0.6'
 
 logger = logging.getLogger(__name__)
 
