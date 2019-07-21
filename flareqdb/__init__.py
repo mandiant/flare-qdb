@@ -85,6 +85,7 @@ def shim_getSymList(self):
         try:
             retval.append(self.getSymByName(name))
         except AttributeError:
+            logger.warning('Error getting symbol list for %s' % (name))
             pass
 
     return retval
