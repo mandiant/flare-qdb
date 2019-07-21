@@ -1422,10 +1422,19 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         self._bp_unknown_fail = False
         self._stored_exception = None
 
+    def __getTraceSwizzled(self):
+        """Use the vtrace factory to get a trace, but override the getSymList
+        method with a shim that prevents unwanted termination if a module's
+        symbol list can't be had. This occurs with profapi when loading
+        notepad, for instance.
+        """
+        trace = vtrace.getTrace()
+        trace.getSymList = types.MethodType(shim_getSymList, trace)
+        return trace
+
     def _prepareTraceAttach(self, pid):
         self._exitcode = None
-        self._trace = vtrace.getTrace()
-        self._trace.getSymList = types.MethodType(shim_getSymList, self._trace)
+        self._trace = self.__getTraceSwizzled()
         self._trace.setMode('NonBlocking', True)
         self._trace.attach(pid)
         self._trace.setMode('NonBlocking', False)
@@ -1433,8 +1442,7 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
     def _prepareTrace(self, callback):
         self._exitcode = None
-        self._trace = vtrace.getTrace()
-        self._trace.getSymList = types.MethodType(shim_getSymList, self._trace)
+        self._trace = self.__getTraceSwizzled()
         self._trace.setMode('NonBlocking', False)
         callback(self._trace)
         self._trace.setMode('RunForever', True)  # Requires an attached trace
