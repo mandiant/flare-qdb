@@ -18,16 +18,17 @@ import logging
 import argparse
 import traceback
 import itertools
-from collections import defaultdict
 from collections import namedtuple
+from collections import defaultdict
+import vtrace.platforms.win32 as vpwin
+import envi.symstore.resolver as e_resolver
 
 __author__ = 'Michael Bailey'
 __copyright__ = 'Copyright (C) 2016 FireEye'
 __license__ = 'Apache License'
-__version__ = '1.0.5'
+__version__ = '1.0.6'
 
 logger = logging.getLogger(__name__)
-
 
 ONE_MB = 1024 * 1024
 UNPACK_FMTS = {
@@ -40,8 +41,54 @@ _SPECIAL_ALIASES = [
     [r'\?', 'vex'],
 ]
 
+DEFAULT_SYMPATH = r'SRV*C:\Symbols*http://msdl.microsoft.com/download/symbols'
+
+class SYMBOL_INFO(ctypes.Structure):
+    _fields_ = [
+        ('SizeOfStruct', ctypes.wintypes.ULONG),  # 1104
+        ('TypeIndex', ctypes.wintypes.ULONG),
+        ('Reserved', ctypes.c_int64 * 2),
+        ('Index', ctypes.wintypes.ULONG),
+        ('Size', ctypes.wintypes.ULONG),
+        ('ModBase', ctypes.c_int64),
+        ('Flags', ctypes.wintypes.ULONG),
+        ('Value', ctypes.c_int64),
+        ('Address', ctypes.c_int64),
+        ('Register', ctypes.wintypes.ULONG),
+        ('Scope', ctypes.wintypes.ULONG),
+        ('Tag', ctypes.wintypes.ULONG),
+        ('NameLen', ctypes.wintypes.ULONG),
+        ('MaxNameLen', ctypes.wintypes.ULONG),
+        ('Name', ctypes.c_char * 1024),
+    ]
+
+PSYMBOL_INFO = ctypes.POINTER(SYMBOL_INFO)
+
+PSYM_ENUMERATESYMBOLS_CALLBACK = ctypes.WINFUNCTYPE(ctypes.c_bool,
+                                                    PSYMBOL_INFO,
+                                                    ctypes.c_ulong,
+                                                    ctypes.c_void_p)
+
 StackTraceEntry = namedtuple('StackTraceEntry', 'nr bp ret pc pc_s')
 
+
+def shim_getSymList(self):
+    """
+    Runtime override for method in `envi\symstore\resolver.py` that encounters
+    an exception when attempting to enumerate certain DLLs/symbols.
+
+    Return a list of the symbols which are contained in this resolver.
+    """
+    retval = []
+
+    for name in self.symnames.keys():
+        try:
+            retval.append(self.getSymByName(name))
+        except AttributeError:
+            logger.warning('Error getting symbol list for %s' % (name))
+            pass
+
+    return retval
 
 class QdbBpException(Exception):
     """In-breakpoint exception class.
@@ -84,7 +131,6 @@ class StepType:
 
     stepo, stepi = range(2)
 
-
 class QdbMethodsMixin:
     """Instance methods most likely to be used in a script for setting up a
     qdb session rather than in a breakpoint context.
@@ -92,7 +138,7 @@ class QdbMethodsMixin:
     These are not aliased as unbound methods in the namespace.
     """
 
-    def attach(self, pid):
+    def attach(self, pid, parameters={}):
         """Attach to pid, add queries, and execute.
 
         Parameters
@@ -105,7 +151,17 @@ class QdbMethodsMixin:
         if self._trace is not None:
             return False
 
-        self._prepareTrace(lambda trace: trace.attach(pid))
+        self._parameters = parameters
+        self._bp_unknown_fail = False
+        self._stored_exception = None
+
+        self._prepareTraceAttach(pid)
+
+        # If initialization code was specified, give it first dibs
+        if self._init_code:
+            self._init_attach = True
+            self._evaluate_code(self._init_code)
+            self._init_attach = False
 
         self._conout('Attached to PID ' + str(pid))
 
@@ -127,23 +183,23 @@ class QdbMethodsMixin:
         if not cmdline and not self._trace:
             raise ValueError('Cannot run unattached qdb without cmdline')
 
-        if not self._trace:
-            self._prepareTrace(lambda trace: trace.execute(cmdline))
-
-        self._parameters = parameters
-        self._add_queries_ephemeral()
-
         if cmdline:
             self._conout('Running: ' + str(cmdline))
         else:
             self._conout('Running: PID ' + str(self._trace.getPid()))
 
+        if not self._trace:
+            self._prepareTrace(lambda trace: trace.execute(cmdline))
+
+        self._parameters = parameters
         self._bp_unknown_fail = False
         self._stored_exception = None
 
         # If initialization code was specified, give it first dibs
         if self._init_code:
-            self._evaluate_code(self._init_code, self._exprs)
+            self._evaluate_code(self._init_code)
+
+        self._add_queries_ephemeral()
 
         # If kill() is called in init code, respect it
         if self._runnable:
@@ -348,7 +404,7 @@ class QdbBuiltinsMixin:
 
     def k(self, depth=None):
         """WinDbg-style alias for stack backtrace.
-        
+
         For details, see stacktrace().
         """
         return self.stacktrace(depth)
@@ -500,21 +556,23 @@ class QdbBuiltinsMixin:
             self.retcallback(None, limit)  # Until return
             self.stepi()  # And one more
 
-    def stepi(self):
-        self._trace.stepi()
+    def stepi(self, n=1):
+        for i in range(n):
+            self._trace.stepi()
 
-    def stepo(self):
-        op = self._trace.parseOpcode(self._trace.getProgramCounter())
-        if op.isCall():
-            next = op.va + op.size
-            id = self._trace.addBreakByAddr(next)
-            self._trace.setMode
-            self._trace.setMode('RunForever', False)
-            self._trace.run()
-            self._trace.setMode('RunForever', True)
-            self._trace.removeBreakpoint(id)
-        else:
-            self.stepi()
+    def stepo(self, n=1):
+        for i in range(n):
+            op = self._trace.parseOpcode(self._trace.getProgramCounter())
+            if op.isCall():
+                next = op.va + op.size
+                id = self._trace.addBreakByAddr(next)
+                self._trace.setMode
+                self._trace.setMode('RunForever', False)
+                self._trace.run()
+                self._trace.setMode('RunForever', True)
+                self._trace.removeBreakpoint(id)
+            else:
+                self.stepi()
 
     def retwatch(self, limit=16384, steptype=StepType.stepo):
         """Step the program counter, ignoring breakpoints, until a return
@@ -766,6 +824,15 @@ class QdbBuiltinsMixin:
         self.counts[prettypc] = self.counts[prettypc] + 1
         return self.counts[prettypc]
 
+    def loadSyms(self, modspec=None, path_dbghelp=None, sympath=None):
+        if modspec and isinstance(modspec, basestring):
+            self._loadSyms(modspec, path_dbghelp, sympath, False)
+        else:
+            if not modspec:
+                modspec = [x.name for x in self._trace.getSymList()]
+            for modname in modspec:
+                self._loadSyms(modname, path_dbghelp, sympath, False)
+
     def _getmodoff(self, vexpr_va):
         va = self._vex(vexpr_va)
         maps = self._trace.getMemoryMaps()
@@ -774,6 +841,18 @@ class QdbBuiltinsMixin:
                 off = va - va_start
                 basename = os.path.splitext(os.path.basename(filename))[0]
                 return '%s+%s' % (basename, phex(off))
+
+        return None
+
+    def getmodname(self, vexpr_va):
+        va = self._vex(vexpr_va)
+        maps = self._trace.getMemoryMaps()
+        for (va_start, sz, p, filename) in maps:
+            if (va_start < va) and (va < (va_start + sz)):
+                if filename:
+                    return os.path.splitext(os.path.basename(filename))[0]
+                else:
+                    return None
 
         return None
 
@@ -790,8 +869,28 @@ class QdbBuiltinsMixin:
         returns:
             str: Symbol name or None if unknown.
         """
+        sym = None
         va = self._vex(vexpr_va)
-        return self._trace.getSymByAddrThunkAware(va)[0]
+
+        # First, try the direct approach
+        sym = self._trace.getSymByAddrThunkAware(va)[0]
+
+        # Second, go for nearest
+        if not sym:
+            modname = self.getmodname(va)
+            if modname:
+                mod = self._trace.getSymByName(modname)
+                if mod:
+                    sym = mod.getSymByAddr(va, False)
+                    if sym is not None:
+                        off = va - sym.value
+                        sym = '%s.%s+%s' % (modname, sym.name, phex(off))
+
+        # Last, try for mod+offset
+        if not sym:
+            sym = self._getmodoff(va)
+
+        return sym
 
     def getsym(self, vexpr_va):
         """Get the symbol associated with a location. Alias: ln.
@@ -1298,6 +1397,21 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         # Logging based on :quiet:
         self._con = conlogger
 
+        self.dbghelp = None
+
+        # A superficial fix for a deep, deep issue.
+        #
+        # Upon attaching via attach() instead of running:
+        # * No thread is selected by default
+        # * Consequently, no register context is defined/available
+        # * Selecting a thread requires breaking
+        # * sendBreak requires setting self.phandle (platforms\win32.py forgot)
+        # * sendBreak doesn't clear running
+        #
+        # Furthermore, if you rectify those issues, you still wind up with
+        # more issues: detach() will requireNotRunning(), etc.
+        self._init_attach = False
+
     def _resetDefaults(self):
         self._trace = None
         self._runnable = True
@@ -1307,10 +1421,36 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         self._locals = {}
         self._bp_unknown_fail = False
         self._stored_exception = None
+        self._loadsyms_future = False
+        self._loadsyms_modspec = None
+        self._loaded_symbols = []
+
+    def loadSymsFuture(self, modspec=None):
+        """Load symbols upon evaluating code. None denotes all."""
+        self._loadsyms_future = True
+        self._loadsyms_modspec = modspec
+
+    def __getTraceSwizzled(self):
+        """Use the vtrace factory to get a trace, but override the getSymList
+        method with a shim that prevents unwanted termination if a module's
+        symbol list can't be had. This occurs with profapi when loading
+        notepad, for instance.
+        """
+        trace = vtrace.getTrace()
+        trace.getSymList = types.MethodType(shim_getSymList, trace)
+        return trace
+
+    def _prepareTraceAttach(self, pid):
+        self._exitcode = None
+        self._trace = self.__getTraceSwizzled()
+        self._trace.setMode('NonBlocking', True)
+        self._trace.attach(pid)
+        self._trace.setMode('NonBlocking', False)
+        self._trace.setMode('RunForever', True)  # Requires an attached trace
 
     def _prepareTrace(self, callback):
         self._exitcode = None
-        self._trace = vtrace.getTrace()
+        self._trace = self.__getTraceSwizzled()
         self._trace.setMode('NonBlocking', False)
         callback(self._trace)
         self._trace.setMode('RunForever', True)  # Requires an attached trace
@@ -1348,15 +1488,145 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
                                 str(vexpr_pc))
                 self._add_delayed_query(vexpr_pc, vexpr, conds)
 
+    def _preLoadSyms(self, path_dbghelp=None, sympath=None):
+        self.dbghelp = None
+
+        arch = self._trace.getMeta('Architecture')
+
+        if not sympath:
+            self.sympath = DEFAULT_SYMPATH
+
+        if not path_dbghelp:
+            the_dir = os.path.dirname(os.path.realpath(__file__))
+            path_dbghelp = os.path.join(the_dir, arch, 'dbghelp.dll')
+            self._conout('Trying dbghelp from %s' % (path_dbghelp))
+
+        try:
+            self.dbghelp = ctypes.WinDLL(path_dbghelp)
+        except WindowsError as e:
+            if e.winerror == 126:
+                print(str(e))
+                raise
+            elif e.winerror == 193:
+                self._conout(str(e))
+                self._conout('Did we try to load a 64-bit dbghelp.dll in a '
+                             '32-bit Python (or vice-versa)?')
+                raise
+            else:
+                raise
+
+        self.dbghelp.SymLoadModuleEx.argtypes = [ctypes.wintypes.HANDLE,
+                                                 ctypes.wintypes.HANDLE,
+                                                 ctypes.c_char_p,
+                                                 ctypes.c_char_p,
+                                                 ctypes.c_int64,
+                                                 ctypes.wintypes.DWORD,
+                                                 ctypes.c_void_p,
+                                                 ctypes.wintypes.DWORD,
+                                                ]
+
+        self.dbghelp.SymEnumSymbols.argtypes = [ctypes.wintypes.HANDLE,
+                                                ctypes.c_int64,
+                                                ctypes.c_char_p,
+                                                PSYM_ENUMERATESYMBOLS_CALLBACK,
+                                                ctypes.c_void_p,
+                                               ]
+
+    def _loadSyms(self, modname, path_dbghelp, sympath, raise_on_fail):
+        """Load symbols for a loaded module."""
+        if modname in self._loaded_symbols:
+            return True
+
+        # Emulating dbh.exe, accommodating 32-bit argument to SymLoadModuleEx
+        fakebase = 0x1000000
+
+        # Emulating dbh.exe, turns out unnecessary, but TIL I can specify a TID
+        hProcess = ctypes.windll.kernel32.GetCurrentThreadId()
+
+        mask = u''  # Emulating dbh.exe
+
+        if not self.dbghelp:
+            self._preLoadSyms(path_dbghelp, sympath)
+
+        def handle_err(msg):
+            if raise_on_fail:
+                raise RuntimeError(msg)
+            else:
+                self._conout(msg)
+                return False
+
+        self._conout('Loading symbols for %s' % (modname))
+
+        # Find the requested module in the trace object
+        mod = self._trace.getSymByName(modname)
+        if not mod:
+            return handle_err('Module %s is not loaded' % (modname))
+
+        real_base = mod.baseaddr
+        modfilename = mod.fname
+
+        # mod.fname's always None, so find backing filename through memory maps
+        if not modfilename:
+            maps = self._trace.getMemoryMaps()
+            for (va, sz, p, filename) in maps:
+                if filename and (va <= real_base) and (real_base < (va + sz)):
+                    modfilename = filename.encode('ascii')
+
+        if not modfilename:
+            return handle_err('Cannot find backing filename for module %s' %
+                              (modname))
+
+        opts = self.dbghelp.SymGetOptions()
+        # So you can use SysInternals DbgView to troubleshoot
+        opts |= vpwin.SYMOPT_DEBUG
+        self.dbghelp.SymSetOptions(opts)
+
+        ok = self.dbghelp.SymInitialize(hProcess, self.sympath, False)
+        if not ok:
+            return handle_err('SymInitialize failed, %d' %
+                              (ctypes.GetLastError()))
+
+        modbase_loaded = self.dbghelp.SymLoadModuleEx(hProcess, 0, modfilename,
+                                                 ctypes.c_char_p(None),
+                                                 fakebase, 0, 0, 0)
+        if not modbase_loaded:
+            return handle_err('SymLoadModuleEx failed, %d' %
+                              (ctypes.GetLastError()))
+
+        def EnumSymsCallback(pSymInfo, SymbolSize, UserContext):
+            si = pSymInfo.contents
+            # Adjust for fake base
+            va_actual = si.Address - si.ModBase + real_base
+            vs = e_resolver.Symbol(si.Name, va_actual, si.Size)
+            mod.addSymbol(vs)
+            return True
+
+        c_enum_callback = PSYM_ENUMERATESYMBOLS_CALLBACK(EnumSymsCallback)
+
+        ok = self.dbghelp.SymEnumSymbols(hProcess, modbase_loaded, mask,
+                                         c_enum_callback, 0)
+
+        self.dbghelp.SymUnloadModule(hProcess, fakebase)
+
+        self._loaded_symbols.append(modname)
+
+        return True
+
     def _evaluate_code(self, query, exprs=None, qbp=None):
         """Run Python or callable"""
-        pc = self._trace.getProgramCounter()
+        pc = 0
+        if not self._init_attach:
+            pc = self._trace.getProgramCounter()
+
         context = {}
         context['pc'] = pc
         context['trace'] = self._trace
         context['q'] = self
         context['qbp'] = qbp  # Qdb Breakpoint
         context['exprs'] = exprs
+
+        if self._loadsyms_future:
+            self.loadSyms(self._loadsyms_modspec)
 
         if callable(query):
             self._dispatch_callable(query, context)
@@ -1414,6 +1684,44 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
     def _vex(self, vexpr):
         return self._trace.parseExpression(str(vexpr))
 
+    def _get_pre_prolog_saved_ret_x86(self):
+        """Determine if we are in the prolog and return saved ret accordingly.
+        
+        A typical Microsoft prolog including the 2-byte nop, annotated with
+        where to find the saved return value:
+
+                            ; This is CreateProcessW (aka CreateProcessWStub)
+            mov edi,edi     ; poi(esp)
+            push ebp        ; poi(esp)
+            mov ebp,esp     ; poi(esp+4)
+            pop ebp         ; Not in the prolog anymore, home free
+            jmp dword [0x74071428]
+
+        Before the prolog, EBP is off limits because it refers to the previous
+        stack frame, and using that frame to determine the saved return address
+        would result in skipping over (omitting) the caller of the function we
+        are in.
+
+        Note that in the specific example above, Microsoft's API stub has a
+        `pop ebp` which causes this second-trace-frame-omission problem to
+        occur despite these efforts. But this solution is good enough for me
+        because I tested, and WinDbg suffers the same problem.
+
+        Who knew stack traces could be so interesting! Ha ha!
+        """
+        eip = self._vex('eip')
+        instrs = self._disas(eip, 5)
+
+        if str(instrs[0]) == 'mov ebp,esp':
+            return self._vex('poi(esp+4)')
+
+        for i in range(4):
+            if ((str(instrs[i]) == 'push ebp') and
+                    (str(instrs[i + 1]) == 'mov ebp,esp')):
+                return self._vex('poi(esp)')
+
+        return None
+
     def _stacktrace_x86(self, archwidth, depth=None):
         """Stack backtrace implementation for x86.
 
@@ -1430,12 +1738,15 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
             list of (frame number, ebp, ret, eip, and symbolic eip)
 
         """
+        hexwidth = 2 * archwidth
+
         trace = []
 
         ebp = self._vex('ebp')
         eip = self._vex('eip')
 
-        hexwidth = 2 * archwidth
+        ret = self._get_pre_prolog_saved_ret_x86()
+        in_prolog_first_iteration = bool(ret)
 
         trace_range = range(depth) if depth else itertools.count()
         for n in trace_range:
@@ -1443,10 +1754,11 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
                 break
 
             # Calculating for this iteration
-            try:
-                ret = self._vex('poi(%s+%d)' % (phex(ebp), archwidth))
-            except vtrace.PlatformException as e:
-                break
+            if not in_prolog_first_iteration:
+                try:
+                    ret = self._vex('poi(%s+%d)' % (phex(ebp), archwidth))
+                except vtrace.PlatformException as e:
+                    break
 
             # Collect trace information
             eip_s = (self._getsym(eip) or self._getmodoff(eip) or
@@ -1462,10 +1774,14 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
             # For next iteration
             eip = ret
-            try:
-                ebp = self._vex('poi(%s)' % (phex(ebp)))
-            except vtrace.PlatformException as e:
-                break
+
+            if in_prolog_first_iteration:
+                in_prolog_first_iteration = False
+            else:
+                try:
+                    ebp = self._vex('poi(%s)' % (phex(ebp)))
+                except vtrace.PlatformException as e:
+                    break
 
         return trace
 
@@ -1587,7 +1903,9 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         """Return the symbolic name specified on the command line corresponding
         to this program counter value, if any.
         """
-        pc = self._trace.getProgramCounter()
+        pc = 0
+        if not self._init_attach:
+            pc = self._trace.getProgramCounter()
 
         ret = phex(pc)
         try:

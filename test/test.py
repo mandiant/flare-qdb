@@ -699,6 +699,18 @@ def test_retset():
     assert locs['marker'] == 3
 
 
+def test_syms():
+    cmdline = 'cmd /c net helpmsg 0'
+    dbg = Qdb()
+    locs = {'marker1': None, 'marker2': None}
+    bytevalue = 0xa5
+    dbg.setInitCode("loadSyms(); eb('cmd.fDumpParse', %d)" % (bytevalue))
+    dbg.add_query('cmd.Dispatch', "marker1 = True; marker2 = db('cmd.fDumpParse', 1)[0]")
+    dbg.run(cmdline, locs)
+    assert locs['marker1'] is True
+    assert locs['marker2'] == bytevalue
+
+
 def test_retset():
     pass
 
