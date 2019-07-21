@@ -13,6 +13,8 @@ def qdb_parse_cmdline_args(console):
                         help='program and arguments to run')
     parser.add_argument('-q', help='suppress normal console output',
                         default=False, action='store_true')
+    parser.add_argument('-loadsyms', metavar='symnames', default='',
+                        help='Symbols to load. * (asterisk) denotes all.')
     parser.add_argument('-attach', metavar='pid', type=int,
                         help='Process to attach to')
     parser.add_argument('-init', metavar='pythontext', help='Initialization')
@@ -65,6 +67,10 @@ def main():
         console.setLevel(logging.INFO)
 
     dbg = Qdb(console)
+
+    if args.loadsyms:
+        modspec = None if args.loadsyms == '*' else args.loadsyms.split()
+        dbg.loadSymsFuture(modspec)
 
     if args.init:
         dbg.setInitCode(args.init)

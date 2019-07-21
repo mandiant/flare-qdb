@@ -1421,6 +1421,14 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         self._locals = {}
         self._bp_unknown_fail = False
         self._stored_exception = None
+        self._loadsyms_future = False
+        self._loadsyms_modspec = None
+        self._loaded_symbols = []
+
+    def loadSymsFuture(self, modspec=None):
+        """Load symbols upon evaluating code. None denotes all."""
+        self._loadsyms_future = True
+        self._loadsyms_modspec = modspec
 
     def __getTraceSwizzled(self):
         """Use the vtrace factory to get a trace, but override the getSymList
@@ -1526,6 +1534,9 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
     def _loadSyms(self, modname, path_dbghelp, sympath, raise_on_fail):
         """Load symbols for a loaded module."""
+        if modname in self._loaded_symbols:
+            return True
+
         # Emulating dbh.exe, accommodating 32-bit argument to SymLoadModuleEx
         fakebase = 0x1000000
 
@@ -1597,6 +1608,8 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
 
         self.dbghelp.SymUnloadModule(hProcess, fakebase)
 
+        self._loaded_symbols.append(modname)
+
         return True
 
     def _evaluate_code(self, query, exprs=None, qbp=None):
@@ -1611,6 +1624,9 @@ class Qdb(QdbMethodsMixin, QdbBuiltinsMixin):
         context['q'] = self
         context['qbp'] = qbp  # Qdb Breakpoint
         context['exprs'] = exprs
+
+        if self._loadsyms_future:
+            self.loadSyms(self._loadsyms_modspec)
 
         if callable(query):
             self._dispatch_callable(query, context)
