@@ -21,7 +21,7 @@ def read(fname):
 
 setup(
     name="flareqdb",
-    version="1.0.6",
+    version="1.0.7",
     author="Michael Bailey",
     author_email="michael.bailey@fireeye.com",
     description=("Query-oriented debugger"),

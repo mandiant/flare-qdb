@@ -18,6 +18,7 @@ import logging
 import argparse
 import traceback
 import itertools
+import ctypes.wintypes
 from collections import namedtuple
 from collections import defaultdict
 import vtrace.platforms.win32 as vpwin
@@ -26,7 +27,7 @@ import envi.symstore.resolver as e_resolver
 __author__ = 'Michael Bailey'
 __copyright__ = 'Copyright (C) 2016 FireEye'
 __license__ = 'Apache License'
-__version__ = '1.0.6'
+__version__ = '1.0.7'
 
 logger = logging.getLogger(__name__)
 
