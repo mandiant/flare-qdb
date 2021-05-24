@@ -300,6 +300,10 @@ def runHookedCmd(offset, logdir, nerf=False):
 
         g_logfile = fmt_logfile_name(logdir, i)
 
+    # Remove all handlers associated with the root logger object
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
     logging.basicConfig(filename=g_logfile, level=logging.INFO)
 
     q = flareqdb.Qdb()
